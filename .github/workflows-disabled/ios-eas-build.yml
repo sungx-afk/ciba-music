@@ -1,5 +1,9 @@
 name: EAS Build & Submit iOS
 
+# 已停用：本文件放在 workflows-disabled/ 下，GitHub Actions 不会加载。
+# 需要启用时：git mv 回 .github/workflows/ios-eas-build.yml，
+# 并在仓库 Settings → Secrets 配好 EXPO_TOKEN / EXPO_PROJECT_ID 等（见 README）。
+#
 # 云端编译 + 签名 + 上传 TestFlight，全程不需要本机 Xcode
 on:
   push:

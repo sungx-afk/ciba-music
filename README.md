@@ -90,6 +90,10 @@ eas login
 
 ## 真机签名包与 TestFlight 内测
 
+> ⚠️ 当前已停用：对应的 workflow 从 `.github/workflows/` 移到了
+> `.github/workflows-disabled/ios-eas-build.yml`（GitHub 不会加载），
+> 打 tag 不会再触发云端构建。功能开发完成后 `git mv` 回去即可恢复，配置步骤见下文。
+
 本机是 macOS 13 + Xcode 15 的情况下无法调试 iOS 18+ 真机，上架/内测包统一走 **EAS 云端构建**：云端自带 Xcode 16，自动完成编译、签名、上传 TestFlight。
 
 ### 一次性准备（在本机执行，只需做一次）
