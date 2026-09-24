@@ -1,0 +1,151 @@
+name: Build & Release iOS App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build iOS App (Cloud Xcode)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode_15.3.app || sudo xcode-select -s /Applications/Xcode.app || true
+          xcodebuild -version
+
+      - name: Install Project Dependencies
+        run: npm ci || npm install
+
+      - name: Prebuild iOS Project with Expo
+        run: npx expo prebuild --platform ios --clean
+
+      # 兜底：Expo 有时会用工程名覆盖 CFBundleDisplayName，这里强制写回中文主屏名
+      - name: Set iOS Display Name
+        run: |
+          PLIST=$(find ios -name "Info.plist" -not -path "*/Pods/*" -not -path "*Supporting Files*" | head -n 1)
+          echo "Info.plist: $PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 糍粑看美剧学英语" "$PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 糍粑看美剧学英语" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST"
+
+      - name: Install CocoaPods Dependencies
+        run: |
+          set -o pipefail
+          mkdir -p build
+          cd ios
+          pod install --repo-update 2>&1 | tee ../build/pod-install.log
+
+      # 直接 build（不做 archive）：无签名打包不需要 install 环节，
+      # 产物必定落在 DerivedData/Build/Products/Release-iphoneos，不受 SKIP_INSTALL 影响
+      - name: Build iOS App (Unsigned)
+        run: |
+          set -o pipefail
+          WORKSPACE=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -n 1)
+          APP_NAME=$(node -p "require('./app.json').expo.name" 2>/dev/null || echo "")
+          # scheme 必须取 App 自己的：workspace 里混着 boost / Pods-* 等三方 scheme，
+          # 取错会「BUILD/ARCHIVE SUCCEEDED」但产物里没有 .app
+          SCHEME=$(node tools/pick-ios-scheme.js "$WORKSPACE" "$APP_NAME" || true)
+          if [ -z "$SCHEME" ]; then
+            SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          fi
+          echo "Building Workspace: $WORKSPACE, Scheme: $SCHEME, App: $APP_NAME"
+          rm -rf build/DerivedData build/App.xcarchive
+          mkdir -p build
+          xcodebuild -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build 2>&1 | tee build/xcodebuild.log
+
+      # 把真正的编译错误提到 Annotations，失败时不用翻整份日志
+      - name: Surface Build Errors
+        if: failure()
+        run: |
+          echo "::error title=toolchain::Xcode $(xcode-select -p) | $(xcodebuild -version | tr '\n' ' ')"
+          if [ -d ios ]; then
+            echo "::error title=ios-dir::ios 目录内容: $(ls ios 2>/dev/null | head -15 | tr '\n' ' ')"
+          else
+            echo "::error title=ios-dir::ios 目录不存在（prebuild 未生成）"
+          fi
+          node tools/surface-xcode-errors.js build/pod-install.log pod-install
+          node tools/surface-xcode-errors.js build/xcodebuild.log xcodebuild
+
+      # 打包前先确认真的编出了 .app，找不到就把目录和日志关键点打出来
+      - name: Locate Built App
+        run: |
+          APP_PATH=$(find build/DerivedData/Build/Products -maxdepth 2 -name "*.app" -type d 2>/dev/null | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error title=build::DerivedData 里没有 .app（多半还是 scheme 选错）"
+            echo "Products 目录:"
+            ls -la build/DerivedData/Build/Products 2>/dev/null | head -20 || true
+            echo "Release-iphoneos:"
+            ls -la build/DerivedData/Build/Products/Release-iphoneos 2>/dev/null | head -30 || true
+            grep -E "BUILD SUCCEEDED|BUILD FAILED|error:|Scheme" build/xcodebuild.log 2>/dev/null | tail -20
+            exit 1
+          fi
+
+          echo "找到 App: $APP_PATH"
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+
+      - name: Package IPA
+        run: |
+          APP_PATH="${APP_PATH:-$(find build/DerivedData/Build/Products -maxdepth 2 -name '*.app' -type d 2>/dev/null | head -n 1)}"
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry CibaMusic-iOS.ipa Payload
+          mkdir -p build-output
+          cp CibaMusic-iOS.ipa build-output/CibaMusic-iOS-latest.ipa
+
+          VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "1.0.0")
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG_VER="${{ github.ref_name }}"
+            VERSION="${TAG_VER#v}"
+          fi
+          cp CibaMusic-iOS.ipa "build-output/CibaMusic-iOS-v${VERSION}.ipa"
+          echo "PACKAGE_VERSION=v${VERSION}" >> $GITHUB_ENV
+          echo "IOS_READY=true" >> $GITHUB_ENV
+
+      - name: Upload IPA to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CibaMusic-iOS-IPA
+          path: build-output/*.ipa
+          retention-days: 30
+
+      # 只有 tag 推送才发 Release：手动跑（workflow_dispatch）只上传 Artifact，避免拿分支去建 Release
+      - name: Create or Update GitHub Release
+        if: env.IOS_READY == 'true' && github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.PACKAGE_VERSION || github.ref_name }}
+          name: 糍粑看美剧学英语 ${{ env.PACKAGE_VERSION || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: build-output/*.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

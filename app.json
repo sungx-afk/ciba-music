@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "CibaMusic",
+    "slug": "ciba-music",
+    "version": "1.0.0",
+    "scheme": "cibamusic",
+    "orientation": "portrait",
+    "icon": "./src/assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F5F4EF"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.cibamusic",
+      "infoPlist": {
+        "CFBundleDisplayName": "CibaMusic",
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLName": "weixin",
+            "CFBundleURLSchemes": [
+              "wxYOURAPPID",
+              "cibamusic"
+            ]
+          }
+        ],
+        "LSApplicationQueriesSchemes": [
+          "weixin",
+          "weixinULAPI"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.example.cibamusic",
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#295147"
+      }
+    },
+    "web": {
+      "favicon": "./src/assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      "expo-apple-authentication",
+      "react-native-iap"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
