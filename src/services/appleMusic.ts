@@ -18,6 +18,8 @@ export type { SubscriptionStatus } from '../../modules/apple-music-subscription'
 
 export interface SubscriptionInfo {
   status: SubscriptionStatus;
+  /** MusicKit 授权状态：区分「没登录 Apple Music」(notDetermined) 与「真读不到」 */
+  authorizationStatus: 'authorized' | 'denied' | 'restricted' | 'notDetermined' | 'unsupported' | 'unknown';
   canPlayCatalogContent: boolean;
   canBecomeSubscriber: boolean;
   /** 最近一次真实检测的时间戳，0 = 从未成功检测过 */
@@ -37,6 +39,7 @@ const MAX_PROMPT = 2;
 
 const UNKNOWN: SubscriptionInfo = {
   status: 'unknown',
+  authorizationStatus: 'unknown',
   canPlayCatalogContent: false,
   canBecomeSubscriber: false,
   updatedAt: 0,
@@ -92,11 +95,14 @@ export async function refreshSubscription(force = false): Promise<SubscriptionIn
     const native = await fetchSubscriptionStatus();
     const next: SubscriptionInfo = {
       status: native?.status ?? 'unknown',
+      authorizationStatus: native?.authorizationStatus ?? 'unknown',
       canPlayCatalogContent: !!native?.canPlayCatalogContent,
       canBecomeSubscriber: !!native?.canBecomeSubscriber,
       updatedAt: Date.now(),
     };
     applyInfo(next);
+    // 调试用：真机可在 设置→隐私→分析与改进 / Xcode 控制台 看到这次检测到的原始状态
+    console.log('[AppleMusic] subscription =>', next.status, 'auth=', next.authorizationStatus);
     try {
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(next));
     } catch {

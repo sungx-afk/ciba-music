@@ -9,9 +9,11 @@ import { requireNativeModule } from 'expo';
  */
 
 export type SubscriptionStatus = 'subscribed' | 'eligible' | 'unknown';
+export type AuthorizationStatus = 'authorized' | 'denied' | 'restricted' | 'notDetermined' | 'unsupported' | 'unknown';
 
 export interface NativeSubscriptionStatus {
   status: SubscriptionStatus;
+  authorizationStatus?: AuthorizationStatus;
   canPlayCatalogContent: boolean;
   canBecomeSubscriber: boolean;
   hasCloudLibraryEnabled?: boolean;
@@ -47,6 +49,7 @@ export async function fetchSubscriptionStatus(): Promise<NativeSubscriptionStatu
       raw.status === 'subscribed' || raw.status === 'eligible' ? raw.status : 'unknown';
     return {
       status,
+      authorizationStatus: (raw.authorizationStatus as AuthorizationStatus) ?? 'unknown',
       canPlayCatalogContent: !!raw.canPlayCatalogContent,
       canBecomeSubscriber: !!raw.canBecomeSubscriber,
       hasCloudLibraryEnabled: !!raw.hasCloudLibraryEnabled,
