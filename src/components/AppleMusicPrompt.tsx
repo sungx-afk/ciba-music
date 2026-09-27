@@ -17,9 +17,9 @@ import { showToast } from '../utils/toast';
  * 未编入原生模块（Expo Go / 安卓）时一律不显示。
  * 右上角 × 只做「本次会话内隐藏」，不做永久关闭。
  *
- * TODO: 调试完成后把 SHOW_DEBUG 关掉（临时在首页显示原生检测结果，便于真机排查）
+ * SHOW_DEBUG 打开后会在首页显示原生检测结果，排查真机问题时可临时置为 true。
  */
-const SHOW_DEBUG = true;
+const SHOW_DEBUG = false;
 
 export const AppleMusicPrompt: React.FC = () => {
   const subscription = useAppleMusicSubscription();
