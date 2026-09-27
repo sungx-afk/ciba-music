@@ -9,15 +9,11 @@ import MusicKit
  *   canBecomeSubscriber  = true   → 未订阅且允许 App 展示订阅引导
  *   两者都 false                  → 未知（没登录 Apple Music / 地区不支持 / 模拟器），别提示
  *
- * 关键坑：MusicSubscription 的订阅状态是异步加载的。App 冷启动时第一次读
- * `MusicSubscription.current`，`canPlayCatalogContent` / `canBecomeSubscriber` 往往还都是 false，
- * 必须等它填充完成再判断，否则会稳定误判成 `unknown` 导致永远不提示。
- * 这里轮询一小段时间（最多 ~1.8s）等它加载。
- *
- * 注：早期版本曾用 `MusicAuthorization.current` 读取授权状态做区分，但新 SDK（Xcode 26 / iOS 26）
- * 已移除该静态成员，编译会报 “type 'MusicAuthorization' has no member 'current'”。
- * 订阅检测本身不依赖 App 的音乐授权，故此处去掉 MusicAuthorization 相关调用，
- * authorizationStatus 暂恒为 "unknown"（仅为诊断字段，不影响 eligible 判定）。
+ * 关键坑：MusicSubscription 的订阅状态是异步加载的。在较新的 SDK（Xcode 26 / iOS 26）里，
+ * `MusicSubscription.current` 本身是 `async throws` 属性，读取必须 `try await`，且冷启动时
+ * 第一次读到的值里 canPlayCatalogContent / canBecomeSubscriber 往往还都是 false。
+ * 因此这里用 `try await` 读取并轮询一小段时间（最多 ~1.8s）等它加载完成再判断，
+ * 否则会稳定误判成 unknown 导致首页「去订阅」引导条永远不显示。
  *
  * 前置条件：开发者后台给 App ID 勾上 MusicKit App Service（Automatic Developer Token
  * Generation 就靠这个开关，所以这里不需要自己签 developer token）。
@@ -37,12 +33,30 @@ public final class AppleMusicSubscriptionModule: Module {
         return
       }
       Task { @MainActor in
+        // MusicSubscription.current 在较新 SDK 上为 async throws，读取需 try await
+        var subscription: MusicSubscription
+        do {
+          subscription = try await MusicSubscription.current
+        } catch {
+          promise.resolve([
+            "status": "unknown",
+            "authorizationStatus": "unknown",
+            "canPlayCatalogContent": false,
+            "canBecomeSubscriber": false,
+            "error": error.localizedDescription,
+          ])
+          return
+        }
+
         // 订阅状态异步加载：轮询等它填充完成，避免冷启动误判 unknown
-        var subscription = MusicSubscription.current
         for _ in 0..<12 {
           if subscription.canPlayCatalogContent || subscription.canBecomeSubscriber { break }
           try? await Task.sleep(nanoseconds: 150_000_000)
-          subscription = MusicSubscription.current
+          do {
+            subscription = try await MusicSubscription.current
+          } catch {
+            break
+          }
         }
 
         let status: String
