@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { aiInsights } from '../data/mock';
@@ -7,10 +8,12 @@ import { aiInsights } from '../data/mock';
 const ASKS = ['解释难点', '语法讲解', '地道表达', '练习建议'];
 
 export const AIScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  /** 顶部避开状态栏、底部避开 Home Indicator */
+  const insets = useSafeAreaInsets();
   const [ask, setAsk] = useState(0);
   return (
-    <View style={styles.root}>
-      <View style={styles.hero}>
+    <View style={[styles.root, { paddingBottom: insets.bottom }]}>
+      <View style={[styles.hero, { paddingTop: insets.top + 12 }]}>
         <View style={styles.topBar}>
           <TouchableOpacity onPress={onBack}>
             <Ionicons name="chevron-back" size={24} color="#fff" />

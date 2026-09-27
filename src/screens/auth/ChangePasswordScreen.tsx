@@ -12,13 +12,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../../theme/colors';
 import { AuthInput } from '../../components/AuthInput';
 import { AuthApi } from '../../services/api';
+import { AuthNavProps } from '../../navigation/authNav';
 
-export const ChangePasswordScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
+export const ChangePasswordScreen: React.FC<AuthNavProps> = ({ onBack }) => {
+  
 
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -52,7 +52,7 @@ export const ChangePasswordScreen: React.FC = () => {
 
       if (res && res.result === 1) {
         Alert.alert('修改成功', '您的登录密码已修改成功，请妥善保存。', [
-          { text: '确定', onPress: () => navigation.goBack() },
+          { text: '确定', onPress: () => onBack() },
         ]);
       } else {
         Alert.alert('修改失败', res?.msg || '原密码验证未通过，请检查后重试');
@@ -74,7 +74,7 @@ export const ChangePasswordScreen: React.FC = () => {
         <View style={styles.navBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => navigation.goBack()}
+            onPress={() => onBack()}
             activeOpacity={0.7}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >

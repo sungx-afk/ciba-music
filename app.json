@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.example.cibamusic",
+      "bundleIdentifier": "com.yugusoft.CibaEnglish.music",
       "infoPlist": {
         "CFBundleDisplayName": "CibaMusic",
         "ITSAppUsesNonExemptEncryption": false,
@@ -53,8 +53,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "a946d3f6-7da8-4733-a00e-dfc57840c5e2"
       }
-    }
+    },
+    "owner": "liushuang5s-team"
   }
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -19,6 +20,8 @@ const WAVE = [10, 17, 8, 21, 13, 25, 11, 19, 9, 15, 23, 12, 18, 14, 22];
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 export const ListeningScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  /** 顶部避开状态栏、底部避开 Home Indicator */
+  const insets = useSafeAreaInsets();
   const [picked, setPicked] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,7 +59,7 @@ export const ListeningScreen: React.FC<{ onBack: () => void }> = ({ onBack }) =>
   };
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <StatusBar style="light" />
 
       {/* 模糊后的专辑封面底色 */}

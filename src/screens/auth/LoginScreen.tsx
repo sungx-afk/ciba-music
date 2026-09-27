@@ -15,13 +15,13 @@ import {
 } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../../theme/colors';
 import { AuthInput } from '../../components/AuthInput';
 import { CountdownButton } from '../../components/CountdownButton';
 import { AGREEMENT_URL, POLICY_URL } from '../../config/legal';
 import { AuthApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { AuthNavProps } from '../../navigation/authNav';
 
 type LoginTab = 'mobile' | 'password';
 
@@ -32,8 +32,8 @@ type LoginTab = 'mobile' | 'password';
  */
 const SHOW_THIRD_PARTY_LOGIN = false;
 
-export const LoginScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
+export const LoginScreen: React.FC<AuthNavProps> = ({ onBack, onOpen }) => {
+  
   const { login } = useAuth();
 
   const [activeTab, setActiveTab] = useState<LoginTab>('mobile');
@@ -65,7 +65,7 @@ export const LoginScreen: React.FC = () => {
           });
           if (res && (res.result === 0 || res.result === 1) && res.user && res.token) {
             await login(res.user, res.token);
-            navigation.goBack();
+            onBack();
           } else {
             Alert.alert('微信登录失败', res?.msg || '微信授权校验失败，请使用手机验证码登录');
           }
@@ -89,7 +89,7 @@ export const LoginScreen: React.FC = () => {
     return () => {
       subscription.remove();
     };
-  }, [login, navigation]);
+  }, [login, onBack]);
 
   // 格式化手机号输入 (3-4-4 分段显示)
   const handleMobileChange = (text: string) => {
@@ -143,7 +143,7 @@ export const LoginScreen: React.FC = () => {
       const res = await AuthApi.mobileLogin(trimmedMobile, trimmedCode);
       if (res && (res.result === 0 || res.result === 1) && res.user && res.token) {
         await login(res.user, res.token);
-        navigation.goBack();
+        onBack();
       } else {
         Alert.alert('登录失败', res?.msg || '验证码错误或已过期');
       }
@@ -175,7 +175,7 @@ export const LoginScreen: React.FC = () => {
       const res = await AuthApi.emailLogin(trimmedAccount, password);
       if (res && (res.result === 0 || res.result === 1) && res.user && res.token) {
         await login(res.user, res.token);
-        navigation.goBack();
+        onBack();
       } else {
         Alert.alert('登录失败', res?.msg || '账号或密码不正确');
       }
@@ -302,7 +302,7 @@ export const LoginScreen: React.FC = () => {
 
       if (res && (res.result === 0 || res.result === 1) && res.user && res.token) {
         await login(res.user, res.token);
-        navigation.goBack();
+        onBack();
       } else {
         Alert.alert('Apple 登录失败', res?.msg || 'Apple 授权凭证校验失败，请稍后重试');
       }
@@ -360,7 +360,7 @@ export const LoginScreen: React.FC = () => {
             <View style={styles.navBar}>
               <TouchableOpacity
                 style={styles.closeBtn}
-                onPress={() => navigation.goBack()}
+                onPress={() => onBack()}
                 activeOpacity={0.7}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
@@ -369,7 +369,7 @@ export const LoginScreen: React.FC = () => {
 
               <TouchableOpacity
                 style={styles.registerBadge}
-                onPress={() => navigation.navigate('Register')}
+                onPress={() => onOpen('Register')}
                 activeOpacity={0.75}
               >
                 <Text style={styles.registerBadgeText}>免费注册</Text>
@@ -512,7 +512,7 @@ export const LoginScreen: React.FC = () => {
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      onPress={() => navigation.navigate('ForgotPassword')}
+                      onPress={() => onOpen('ForgotPassword')}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.subActionHighlight}>忘记密码？</Text>
@@ -557,7 +557,7 @@ export const LoginScreen: React.FC = () => {
                   activeOpacity={0.6}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                   onPress={() =>
-                    navigation.navigate('WebPage', { url: AGREEMENT_URL, title: '用户协议' })
+                    onOpen('WebPage', { url: AGREEMENT_URL, title: '用户协议' })
                   }
                 >
                   <Text style={styles.termsLink}>《用户协议》</Text>
@@ -569,7 +569,7 @@ export const LoginScreen: React.FC = () => {
                   activeOpacity={0.6}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                   onPress={() =>
-                    navigation.navigate('WebPage', { url: POLICY_URL, title: '隐私政策' })
+                    onOpen('WebPage', { url: POLICY_URL, title: '隐私政策' })
                   }
                 >
                   <Text style={styles.termsLink}>《隐私政策》</Text>

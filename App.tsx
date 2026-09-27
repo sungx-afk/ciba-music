@@ -21,6 +21,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { ToastHost } from './src/components/ToastHost';
 import { Colors } from './src/theme/colors';
 import { addBootLog, getBootLogs, subscribeBootLog, LogEntry } from './src/utils/crashGuard';
+import { refreshSubscription } from './src/services/appleMusic';
 
 /**
  * 诊断浮窗开关。
@@ -283,6 +284,9 @@ export default function App() {
         addBootLog('App', '已触发 SplashScreen.hideAsync()');
       }
     } catch (_) {}
+
+    // 启动后校准一次 Apple Music 订阅状态（结果进缓存，首页/播放页据此决定是否提示）
+    void refreshSubscription();
   }, []);
 
   return (

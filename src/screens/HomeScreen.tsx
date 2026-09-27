@@ -1,14 +1,66 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
-import { recommendSongs, homeBanner } from '../data/mock';
+import { homeBanner } from '../data/mock';
+import { MusicApi, MusicCollection } from '../services/musicApi';
+import { AppleMusicPrompt } from '../components/AppleMusicPrompt';
 
-export const HomeScreen: React.FC<{ onOpen: (name: string) => void }> = ({ onOpen }) => {
+type OpenFn = (name: string, params?: Record<string, any>) => void;
+
+export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
+  /** 真机状态栏会压住问候语，顶部留出安全区（底部由 TabBar 负责） */
+  const insets = useSafeAreaInsets();
+  const [collections, setCollections] = useState<MusicCollection[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async (silent = false) => {
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setError('');
+    try {
+      const list = await MusicApi.getCollections();
+      setCollections(list);
+    } catch (e: any) {
+      setError(e?.message || '歌单加载失败，请稍后重试');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const openCollection = (item: MusicCollection) => {
+    onOpen('Collection', {
+      collectionId: item.id,
+      collectionName: item.name,
+      coverUrl: item.coverUrl,
+      songCount: item.songCount,
+    });
+  };
+
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.greetRow}>
           <View style={styles.greetText}>
             <Text style={styles.greeting}>Good morning 👋</Text>
@@ -23,7 +75,14 @@ export const HomeScreen: React.FC<{ onOpen: (name: string) => void }> = ({ onOpe
           <Text style={styles.searchText}>搜索歌曲、歌手或专辑...</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.body}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+      >
+        {/* 未订阅 Apple Music 时的非阻断引导（内部自己判断要不要显示） */}
+        <AppleMusicPrompt />
+
         <LinearGradient
           colors={homeBanner.colors}
           start={{ x: 0, y: 0 }}
@@ -39,46 +98,74 @@ export const HomeScreen: React.FC<{ onOpen: (name: string) => void }> = ({ onOpe
             <Ionicons name="play" size={16} color="#fff" />
           </TouchableOpacity>
         </LinearGradient>
+
         <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>为你推荐</Text>
-          <TouchableOpacity style={styles.moreBox}>
-            <Text style={styles.moreText}>查看更多</Text>
-            <Ionicons name="chevron-forward" size={12} color={Colors.textMuted} />
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>精选歌单</Text>
+          {collections.length > 0 ? (
+            <Text style={styles.sectionCount}>共 {collections.length} 个</Text>
+          ) : null}
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-          {recommendSongs.map((s) => (
-            <TouchableOpacity key={s.id} style={styles.songCard} onPress={() => onOpen('Player')}>
-              <LinearGradient colors={s.cover} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.cover}>
-                <Text style={styles.coverMark}>{s.title.charAt(0)}</Text>
-              </LinearGradient>
-              <Text style={styles.songTitle} numberOfLines={1}>{s.title}</Text>
-              <Text style={styles.songArtist} numberOfLines={1}>{s.artist}</Text>
-              <View style={styles.levelTag}><Text style={styles.levelText}>{s.level}</Text></View>
+
+        {loading ? (
+          <View style={styles.stateBox}>
+            <ActivityIndicator color={Colors.blue} />
+            <Text style={styles.stateText}>正在加载歌单…</Text>
+          </View>
+        ) : null}
+
+        {!loading && error ? (
+          <View style={styles.stateBox}>
+            <Ionicons name="cloud-offline-outline" size={26} color={Colors.textMuted} />
+            <Text style={styles.stateText}>{error}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => load()}>
+              <Text style={styles.retryText}>重新加载</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-        <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>最近播放</Text>
-          <TouchableOpacity style={styles.moreBox}>
-            <Text style={styles.moreText}>查看更多</Text>
-            <Ionicons name="chevron-forward" size={12} color={Colors.textMuted} />
-          </TouchableOpacity>
-        </View>
-        {recommendSongs.slice(0, 2).map((s) => (
-          <TouchableOpacity key={s.id} style={styles.recentRow} onPress={() => onOpen('Player')}>
-            <LinearGradient colors={s.cover} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.recentCover}>
-              <Text style={styles.recentMark}>{s.title.charAt(0)}</Text>
-            </LinearGradient>
-            <View style={styles.recentInfo}>
-              <Text style={styles.recentTitle} numberOfLines={1}>{s.title}</Text>
-              <Text style={styles.recentMeta}>{s.artist} · {s.duration}</Text>
-            </View>
-            <TouchableOpacity style={styles.recentMore}>
-              <Ionicons name="ellipsis-horizontal" size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
-          </TouchableOpacity>
-        ))}
+          </View>
+        ) : null}
+
+        {!loading && !error && collections.length === 0 ? (
+          <View style={styles.stateBox}>
+            <Ionicons name="musical-notes-outline" size={26} color={Colors.textMuted} />
+            <Text style={styles.stateText}>暂无歌单</Text>
+          </View>
+        ) : null}
+
+        {!loading && !error
+          ? collections.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.collectionCard}
+                activeOpacity={0.85}
+                onPress={() => openCollection(item)}
+              >
+                {item.coverUrl ? (
+                  <Image source={{ uri: item.coverUrl }} style={styles.cover} />
+                ) : (
+                  <LinearGradient
+                    colors={['#8FB2FF', '#3D5AFE']}
+                    style={[styles.cover, styles.coverFallback]}
+                  >
+                    <Ionicons name="musical-notes" size={22} color="rgba(255,255,255,0.9)" />
+                  </LinearGradient>
+                )}
+                <View style={styles.collectionInfo}>
+                  <Text style={styles.collectionName} numberOfLines={2}>
+                    {item.name}
+                  </Text>
+                  <Text style={styles.collectionDesc} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                  <View style={styles.metaRow}>
+                    <View style={styles.countTag}>
+                      <Ionicons name="musical-note" size={10} color={Colors.blueDeep} />
+                      <Text style={styles.countText}>{item.songCount} 首</Text>
+                    </View>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+            ))
+          : null}
       </ScrollView>
     </View>
   );
@@ -148,47 +235,46 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
-  moreBox: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  moreText: { fontSize: 12, color: Colors.textMuted },
-  row: { gap: 12 },
-  songCard: { width: 104 },
-  cover: {
-    width: 104,
-    height: 104,
-    borderRadius: 12,
+  sectionCount: { fontSize: 12, color: Colors.textMuted },
+  stateBox: {
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    paddingVertical: 26,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
   },
-  coverMark: { fontSize: 30, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
-  songTitle: { fontSize: 13, fontWeight: '600', color: Colors.text, marginTop: 8 },
-  songArtist: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  levelTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.blue,
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    marginTop: 6,
+  stateText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+  retryBtn: {
+    marginTop: 2,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: Colors.blueLight,
   },
-  levelText: { fontSize: 10, color: '#fff', fontWeight: '700' },
-  recentRow: {
+  retryText: { fontSize: 13, fontWeight: '600', color: Colors.blueDeep },
+  collectionCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.card,
-    borderRadius: 12,
-    padding: 10,
+    borderRadius: 14,
+    padding: 12,
     marginBottom: 10,
   },
-  recentCover: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
+  cover: { width: 84, height: 84, borderRadius: 12 },
+  coverFallback: { alignItems: 'center', justifyContent: 'center' },
+  collectionInfo: { flex: 1, marginLeft: 12 },
+  collectionName: { fontSize: 15, fontWeight: '700', color: Colors.text },
+  collectionDesc: { fontSize: 12, color: Colors.textSub, marginTop: 5, lineHeight: 17 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  countTag: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 3,
+    backgroundColor: Colors.blueLight,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
   },
-  recentMark: { fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
-  recentInfo: { flex: 1, marginLeft: 12 },
-  recentTitle: { fontSize: 14, fontWeight: '600', color: Colors.text },
-  recentMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 3 },
-  recentMore: { paddingHorizontal: 4, paddingVertical: 6 },
+  countText: { fontSize: 11, color: Colors.blueDeep, fontWeight: '600' },
 });

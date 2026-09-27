@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useProgress } from '../storage/progressStore';
 import { useAuth } from '../context/AuthContext';
@@ -21,7 +20,8 @@ import { Word, WordSentenceItem } from '../types';
 import { Colors } from '../theme/colors';
 import { pronounceWord } from '../utils/speech';
 import { showToast } from '../utils/toast';
-import { Header } from '../components/Header';
+// 用 music 风格的顶部栏替换糍粑那套带背景图的 Header，接口一致，下面 <Header> 都不用动
+import { PageHeader as Header } from '../components/PageHeader';
 import { ConfirmDialog, DialogPayload } from '../components/ConfirmDialog';
 import { ActionSheet } from '../components/ActionSheet';
 import {
@@ -120,6 +120,11 @@ function formatNumber(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+/**
+ * 待会员开通后继续的评分（同上：放模块级才能在页面卸载后保留）
+ */
+let pendingGradeHolder: BookmarkGrade | null = null;
+
 interface BookmarkStudyScreenProps {
   route: any;
   navigation: any;
@@ -172,7 +177,6 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [learnedInSessionCount, setLearnedInSessionCount] = useState(0);
   /** 被会员限制拦截下来的评分，开通会员后自动继续 */
-  const pendingGradeRef = useRef<BookmarkGrade | null>(null);
   /** 需要升级会员时的提示文案（非空即弹窗） */
   const [vipGateMessage, setVipGateMessage] = useState<string | null>(null);
   /** 统一弹窗状态：确认/提示一律走 ConfirmDialog，不再使用系统 Alert */
@@ -618,7 +622,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
           createDate: (user as any)?.createDate,
         });
         if (gate.blocked) {
-          pendingGradeRef.current = grade;
+          pendingGradeHolder = grade;
           setVipGateMessage(gate.message || '升级 VIP 会员后可继续使用');
           return;
         }
@@ -672,34 +676,33 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
    * 从会员页返回：先刷新用户信息与会员状态，
    * 已开通会员就自动继续刚才被拦截的「已记住」。
    */
-  useFocusEffect(
-    useCallback(() => {
-      const pending = pendingGradeRef.current;
-      if (!pending) return;
-      (async () => {
-        clearVipGateCache();
-        try {
-          await refreshUserInfo?.();
-        } catch {
-          // 刷新失败不阻断，下面仍会按最新接口结果判断
-        }
-        const gate = await checkVipGate({
-          userVip: (user as any)?.vip,
-          masteredCount: stats.masteredCount,
-          createDate: (user as any)?.createDate,
-        });
-        if (gate.blocked) {
-          // 没开通就丢弃待办：否则每次回到页面都会重复刷新并一直挂着这次操作
-          pendingGradeRef.current = null;
-          return;
-        }
-        pendingGradeRef.current = null;
-        showToast('会员已开通，继续复习');
-        handleGradeRef.current(pending);
-      })();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user, stats.masteredCount])
-  );
+  // 自研栈里从会员页返回等于重新挂载，这里照样能继续刚才的评分
+  useEffect(() => {
+    const pending = pendingGradeHolder;
+    if (!pending) return;
+    void (async () => {
+      clearVipGateCache();
+      try {
+        await refreshUserInfo?.();
+      } catch {
+        // 刷新失败不阻断，下面仍会按最新接口结果判断
+      }
+      const gate = await checkVipGate({
+        userVip: (user as any)?.vip,
+        masteredCount: stats.masteredCount,
+        createDate: (user as any)?.createDate,
+      });
+      if (gate.blocked) {
+        // 没开通就丢弃待办：否则每次回到页面都会重复刷新并一直挂着这次操作
+        pendingGradeHolder = null;
+        return;
+      }
+      pendingGradeHolder = null;
+      showToast('会员已开通，继续复习');
+      handleGradeRef.current(pending);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, stats.masteredCount]);
 
   /** 拉取失败后重试：如果是因为卡在末尾失败，成功后自动翻到下一页 */
   const handleRetryMore = async () => {
@@ -719,7 +722,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
         <View style={styles.emptyContainer}>
           {loadingMore ? (
             <>
-              <ActivityIndicator size="large" color={Colors.primary} />
+              <ActivityIndicator size="large" color={Colors.gold} />
               <Text style={styles.emptySubtitle}>正在加载生词本...</Text>
             </>
           ) : (
@@ -816,7 +819,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
                 onPress={() => handlePronounce(item.accent)}
                 activeOpacity={0.7}
               >
-                <Ionicons name="volume-medium-outline" size={16} color={Colors.primary} />
+                <Ionicons name="volume-medium-outline" size={16} color={Colors.gold} />
                 <Text style={styles.phoneticLabel}>{item.label}</Text>
                 <Text style={styles.phoneticText}>/{item.phonetic}/</Text>
               </TouchableOpacity>
@@ -885,7 +888,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
                         activeOpacity={0.7}
                         hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                       >
-                        <Ionicons name="volume-medium-outline" size={16} color={Colors.primary} />
+                        <Ionicons name="volume-medium-outline" size={16} color={Colors.gold} />
                       </TouchableOpacity>
                     ) : null}
                     <View style={styles.sentenceTextWrap}>
@@ -907,12 +910,12 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
       {/* 分页状态提示：拉取中 / 拉取失败可重试 */}
       {loadingMore ? (
         <View style={styles.moreHintWrap}>
-          <ActivityIndicator size="small" color={Colors.primary} />
+          <ActivityIndicator size="small" color={Colors.gold} />
           <Text style={styles.moreHintText}>正在加载更多生词...</Text>
         </View>
       ) : moreError ? (
         <TouchableOpacity style={styles.moreHintWrap} onPress={handleRetryMore} activeOpacity={0.7}>
-          <Ionicons name="refresh" size={16} color={Colors.primary} />
+          <Ionicons name="refresh" size={16} color={Colors.gold} />
           <Text style={styles.moreErrorText}>加载更多失败，点击重试</Text>
         </TouchableOpacity>
       ) : null}
@@ -958,7 +961,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
                 key={btn.id}
                 style={[
                   styles.opItem,
-                  { backgroundColor: OP_COLOR_BY_ID[btn.id] || Colors.primary },
+                  { backgroundColor: OP_COLOR_BY_ID[btn.id] || Colors.gold },
                   grading && styles.actionBtnDisabled,
                 ]}
                 onPress={() => handleGrade(grade)}
@@ -1051,7 +1054,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
                   <Ionicons
                     name={draftSetting[key] === 1 ? 'checkbox' : 'square-outline'}
                     size={20}
-                    color={draftSetting[key] === 1 ? Colors.primary : Colors.textMuted}
+                    color={draftSetting[key] === 1 ? Colors.gold : Colors.textMuted}
                   />
                   <Text style={styles.settingCheckText}>{label}</Text>
                 </TouchableOpacity>
@@ -1137,7 +1140,7 @@ export const BookmarkStudyScreen: React.FC<BookmarkStudyScreenProps> = ({ route,
         }}
         onCancel={() => {
           setVipGateMessage(null);
-          pendingGradeRef.current = null;
+          pendingGradeHolder = null;
         }}
         onClose={() => setVipGateMessage(null)}
       />
@@ -1173,7 +1176,7 @@ const styles = StyleSheet.create({
   mainWordText: {
     fontSize: 34,
     fontWeight: '700',
-    color: Colors.primary,
+    color: Colors.goldDeep,
     textAlign: 'center',
   },
   phoneticRow: {
@@ -1205,7 +1208,7 @@ const styles = StyleSheet.create({
   },
   freqBadge: {
     borderWidth: 1,
-    borderColor: Colors.primary + '55',
+    borderColor: Colors.gold + '55',
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -1213,7 +1216,7 @@ const styles = StyleSheet.create({
   freqText: {
     fontSize: 12,
     fontWeight: '600',
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   timesText: {
     fontSize: 12,
@@ -1244,16 +1247,16 @@ const styles = StyleSheet.create({
   revealBtn: {
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: Colors.primary,
+    borderColor: Colors.gold,
     borderRadius: 999,
     paddingHorizontal: 32,
     paddingVertical: 10,
-    backgroundColor: Colors.primary + '0F',
+    backgroundColor: Colors.gold + '0F',
   },
   revealText: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   answerScroll: {
     flex: 1,
@@ -1316,7 +1319,7 @@ const styles = StyleSheet.create({
   moreErrorText: {
     fontSize: 12,
     fontWeight: '600',
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   // 底部四档：稍后重来 / 1天困难 / 3天一般 / 7天容易，与 web .card_operate 一致
   bottomBar: {
@@ -1485,7 +1488,7 @@ const styles = StyleSheet.create({
     color: Colors.danger,
   },
   settingFooterConfirm: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.goldDeep,
   },
   settingFooterConfirmText: {
     fontSize: 15,
@@ -1506,8 +1509,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   accentBtnActive: {
-    backgroundColor: Colors.primary + '12',
-    borderColor: Colors.primary,
+    backgroundColor: Colors.gold + '12',
+    borderColor: Colors.gold,
   },
   accentBtnText: {
     fontSize: 13,
@@ -1515,14 +1518,14 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   accentBtnTextActive: {
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   settingsDone: {
     marginTop: 18,
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.goldDeep,
   },
   settingsDoneText: {
     color: '#FFFFFF',
@@ -1550,7 +1553,7 @@ const styles = StyleSheet.create({
   },
   returnBtn: {
     marginTop: 24,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.goldDeep,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
@@ -1588,7 +1591,7 @@ const styles = StyleSheet.create({
   highlightText: {
     fontSize: 18,
     fontWeight: '800',
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   statsSummaryCard: {
     flexDirection: 'row',
@@ -1620,7 +1623,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.divider,
   },
   doneBtn: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.goldDeep,
     width: '100%',
     paddingVertical: 14,
     borderRadius: 14,

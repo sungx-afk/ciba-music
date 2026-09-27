@@ -12,16 +12,16 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../../theme/colors';
 import { AuthInput } from '../../components/AuthInput';
 import { CountdownButton } from '../../components/CountdownButton';
 import { AGREEMENT_URL, POLICY_URL } from '../../config/legal';
 import { AuthApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { AuthNavProps } from '../../navigation/authNav';
 
-export const RegisterScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
+export const RegisterScreen: React.FC<AuthNavProps> = ({ onBack, onOpen, onDone }) => {
+  
   const { login } = useAuth();
 
   // 表单状态 (纯手机号注册)
@@ -105,7 +105,8 @@ export const RegisterScreen: React.FC = () => {
 
       if (res && (res.result === 0 || res.result === 1) && res.user && res.token) {
         await login(res.user, res.token);
-        navigation.popToTop();
+        // 直接回主页：注册页压在登录页之上，只 pop 一页会停在登录页
+        (onDone || onBack)();
       } else {
         Alert.alert('注册失败', res?.msg || '注册处理失败，请稍后重试');
       }
@@ -135,7 +136,7 @@ export const RegisterScreen: React.FC = () => {
             <View style={styles.navBar}>
               <TouchableOpacity
                 style={styles.backBtn}
-                onPress={() => navigation.goBack()}
+                onPress={() => onBack()}
                 activeOpacity={0.7}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               >
@@ -242,7 +243,7 @@ export const RegisterScreen: React.FC = () => {
                   activeOpacity={0.6}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                   onPress={() =>
-                    navigation.navigate('WebPage', { url: AGREEMENT_URL, title: '用户协议' })
+                    onOpen('WebPage', { url: AGREEMENT_URL, title: '用户协议' })
                   }
                 >
                   <Text style={styles.termsLink}>《用户协议》</Text>
@@ -254,7 +255,7 @@ export const RegisterScreen: React.FC = () => {
                   activeOpacity={0.6}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                   onPress={() =>
-                    navigation.navigate('WebPage', { url: POLICY_URL, title: '隐私政策' })
+                    onOpen('WebPage', { url: POLICY_URL, title: '隐私政策' })
                   }
                 >
                   <Text style={styles.termsLink}>《隐私政策》</Text>
@@ -267,7 +268,7 @@ export const RegisterScreen: React.FC = () => {
           <View style={styles.bottomGroup}>
             <View style={styles.loginHintRow}>
               <Text style={styles.loginHintText}>已有糍粑账号？</Text>
-              <TouchableOpacity onPress={() => navigation.goBack()} activeOpacity={0.7}>
+              <TouchableOpacity onPress={() => onBack()} activeOpacity={0.7}>
                 <Text style={styles.loginHintLink}>直接登录</Text>
               </TouchableOpacity>
             </View>

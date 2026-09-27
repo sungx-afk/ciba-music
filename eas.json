@@ -37,9 +37,7 @@
   },
   "submit": {
     "production": {
-      "ios": {
-        "groups": ["Team (Expo)"]
-      }
+      "ios": {}
     }
   }
 }

@@ -58,6 +58,41 @@ npm start
 
 ---
 
+## Apple Music 订阅检测（MusicKit）
+
+App 启动后会读一次设备上的 Apple Music 订阅状态，未订阅时在首页给一条**非阻断**的引导条
+（最多两次、可永久关闭），点「去订阅」跳 `https://music.apple.com/subscribe`。
+播放页如果播的是试听片段，也会显示「试听片段 · 订阅 Apple Music 听完整版」。
+
+### 需要的一次性配置
+
+1. Apple Developer → Certificates, Identifiers & Profiles → Identifiers → 打开
+   `com.yugusoft.CibaEnglish.music` → **App Services → 勾选 MusicKit** → 保存
+   （这一步同时是 Apple 官方「Automatic Developer Token Generation」的开关，
+   所以 iOS 端不需要自建 developer token/JWT 服务）
+2. 重新打 EAS 包才生效：`eas build -p ios --profile preview-device`
+   （Expo Go / 模拟器一律拿不到订阅状态，代码会按「未知」处理，不弹任何提示）
+
+### 代码结构
+
+| 位置 | 作用 |
+| --- | --- |
+| `modules/apple-music-subscription/` | 本地 Expo 原生模块（Swift，`MusicSubscription.current`） |
+| `src/services/appleMusic.ts` | 统一门面：三态状态、24h 缓存、提示次数、跳转订阅 |
+| `src/hooks/useAppleMusicSubscription.ts` | 组件用：挂载校准 + 回前台校准 |
+| `src/components/AppleMusicPrompt.tsx` | 首页引导条 |
+
+状态三态：`subscribed` 已订阅 / `eligible` 未订阅可引导 / `unknown` 读不到（安卓、Expo Go、
+没登录 Apple Music、模拟器）—— 只有 `eligible` 才会提示。
+
+### 方案 B（全曲播放）接入点
+
+`src/services/player/` 已经把播放源抽象好：`preview`（expo-av 试听）和 `appleMusic`（MusicKit 全曲）
+实现同一个 `PlayerBackend` 接口，`musicPlayer` 按可用性选源，页面层不感知。
+接通全曲时只改两处：`appleMusicBackend.ts` 里把 `APPLE_MUSIC_PLAYBACK_ENABLED` 置 true 并实现播放方法。
+
+---
+
 ## 云端全自动打包 (EAS Build)
 
 借助 Expo 官方的 EAS (Expo Application Services)，你可以在**无需本地 Mac、无需本地 Xcode** 的情况下，由 Expo 云端服务器自动构建打包：
@@ -90,19 +125,25 @@ eas login
 
 ## 真机签名包与 TestFlight 内测
 
-> ⚠️ 当前已停用：对应的 workflow 从 `.github/workflows/` 移到了
-> `.github/workflows-disabled/ios-eas-build.yml`（GitHub 不会加载），
-> 打 tag 不会再触发云端构建。功能开发完成后 `git mv` 回去即可恢复，配置步骤见下文。
+> 云端构建 workflow 已重新启用：`.github/workflows/ios-eas-build.yml`，
+> 打 tag（`v*`）或在 Actions 里手动 Run workflow 都会触发。
+> 注意 `.github/workflows/ios-build-release.yml` **也监听 `v*` tag**（走 GitHub 的 macOS
+> runner 出未签名 IPA + GitHub Release），两个一起跑会重复构建，按需二选一或改掉其中一个的触发条件。
 
 本机是 macOS 13 + Xcode 15 的情况下无法调试 iOS 18+ 真机，上架/内测包统一走 **EAS 云端构建**：云端自带 Xcode 16，自动完成编译、签名、上传 TestFlight。
 
 ### 一次性准备（在本机执行，只需做一次）
 
+本项目用**项目级账号**操作 EAS，不碰全局登录态（`eas login` 会改全局 `~/.expo`/钥匙串，影响其它项目）：
+
 ```bash
-npm install -g eas-cli
-eas login                        # 登录 Expo 账号
-eas init                         # 生成项目，把 extra.eas.projectId 写入 app.json
-eas credentials --platform ios   # 按提示登录 Apple，让 EAS 托管分发证书与描述文件
+# 1. 用新账号登录 https://expo.dev → Account Settings → Access Tokens → Create token
+# 2. 把令牌写进项目根目录的 .env.local（.gitignore 已忽略 .env*，不会提交）
+echo 'EXPO_TOKEN=你的个人访问令牌' > .env.local
+
+./scripts/eas.sh whoami                        # 确认用的是新账号
+./scripts/eas.sh init                          # 生成项目，把 extra.eas.projectId 写入 app.json
+./scripts/eas.sh credentials --platform ios    # 按提示登录 Apple，让 EAS 托管分发证书与描述文件
 ```
 
 > ⚠️ 菜单里 profile 要选 **production**（App Store 分发，**无需注册测试设备**）。

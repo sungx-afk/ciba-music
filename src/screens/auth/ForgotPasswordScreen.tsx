@@ -12,16 +12,16 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../../theme/colors';
 import { AuthInput } from '../../components/AuthInput';
 import { CountdownButton } from '../../components/CountdownButton';
 import { AuthApi } from '../../services/api';
+import { AuthNavProps } from '../../navigation/authNav';
 
 type ResetMethod = 'mobile' | 'email';
 
-export const ForgotPasswordScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
+export const ForgotPasswordScreen: React.FC<AuthNavProps> = ({ onBack }) => {
+  
 
   const [method, setMethod] = useState<ResetMethod>('mobile');
   const [account, setAccount] = useState('');
@@ -128,7 +128,8 @@ export const ForgotPasswordScreen: React.FC = () => {
         Alert.alert('重置成功', '您的登录密码已成功更新，请重新登录。', [
           {
             text: '去登录',
-            onPress: () => navigation.navigate('Login'),
+            // 找回密码页是从登录页压上来的，直接返回就能回到登录页
+            onPress: () => onBack(),
           },
         ]);
       } else {
@@ -151,7 +152,7 @@ export const ForgotPasswordScreen: React.FC = () => {
         <View style={styles.navBar}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => navigation.goBack()}
+            onPress={() => onBack()}
             activeOpacity={0.7}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >

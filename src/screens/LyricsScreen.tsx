@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -22,6 +23,8 @@ const FONT_SCALES = [0.92, 1, 1.12];
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 export const LyricsScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  /** 顶部避开状态栏、底部避开 Home Indicator */
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<TabKey>('word');
   const [activeIndex, setActiveIndex] = useState(0);
   const [wordIndex, setWordIndex] = useState(0);
@@ -133,7 +136,7 @@ export const LyricsScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <StatusBar style="dark" />
 
       <View style={styles.topBar}>

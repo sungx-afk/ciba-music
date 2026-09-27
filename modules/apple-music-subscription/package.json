@@ -1,0 +1,16 @@
+{
+  "name": "apple-music-subscription",
+  "version": "1.0.0",
+  "description": "读取设备上的 Apple Music 订阅状态（MusicKit）",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sungx-afk/ciba-music.git"
+  },
+  "license": "UNLICENSED",
+  "expo": {
+    "platforms": ["apple"]
+  }
+}

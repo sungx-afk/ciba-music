@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
@@ -11,6 +12,8 @@ import { showToast } from '../utils/toast';
 const HIT = { top: 8, bottom: 8, left: 8, right: 8 };
 
 export const VocabScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  /** 顶部避开状态栏、底部避开 Home Indicator */
+  const insets = useSafeAreaInsets();
   /** 已学习的单词集合，键为单词 id */
   const [learned, setLearned] = useState<Record<string, boolean>>(() =>
     vocabList.reduce<Record<string, boolean>>((acc, v) => {
@@ -58,13 +61,13 @@ export const VocabScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { paddingBottom: insets.bottom }]}>
       {/* 顶部：本首歌重点词汇 + 学习进度 */}
       <LinearGradient
         colors={[Colors.indigo, Colors.indigoDeep]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
-        style={styles.hero}
+        style={[styles.hero, { paddingTop: insets.top + 10 }]}
       >
         <View style={styles.topBar}>
           <TouchableOpacity onPress={onBack} hitSlop={HIT}>

@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -20,7 +19,8 @@ import { useProgress } from '../storage/progressStore';
 import { useAuth } from '../context/AuthContext';
 import { Colors } from '../theme/colors';
 import { Word } from '../types';
-import { Header } from '../components/Header';
+// 用 music 风格的顶部栏替换糍粑那套带背景图的 Header，接口一致，下面 <Header> 都不用动
+import { PageHeader as Header } from '../components/PageHeader';
 import { RichText } from '../components/RichText';
 import { ConfirmDialog, DialogPayload } from '../components/ConfirmDialog';
 import { pronounceWord } from '../utils/speech';
@@ -102,6 +102,13 @@ interface BookmarksScreenProps {
 
 /** 被 VIP 拦截、待开通会员后继续执行的「标记记住」 */
 type PendingMark = { type: 'single'; word: Word } | { type: 'all'; words: Word[] };
+
+/**
+ * 待会员开通后继续的操作。
+ * 放在模块级：本 App 是自研导航栈，打开会员页会把当前页卸载，
+ * 用 useRef 存的话回来时 ref 已重建，续做逻辑会失效。
+ */
+let pendingMarkHolder: PendingMark | null = null;
 
 /** note 首行可能是音标（如「英 /ɡleɪd/  美 /ɡleɪd/」或「[ɡleɪd]」） */
 function extractPhonetic(note: string): string {
@@ -240,7 +247,7 @@ const WordRow: React.FC<WordRowProps> = ({
                 onPress={handlePronounce}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name="volume-medium-outline" size={18} color={Colors.primary} />
+                <Ionicons name="volume-medium-outline" size={18} color={Colors.gold} />
               </TouchableOpacity>
             </View>
             {/* 音标单独一行，长单词或长音标都不会把标题挤变形 */}
@@ -378,7 +385,6 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
   /** 统一弹窗状态：确认/提示一律走 ConfirmDialog，不再使用系统 Alert */
   const [dialog, setDialog] = useState<DialogPayload | null>(null);
   /** 被会员限制拦截下来的「标记记住」，开通会员后自动继续 */
-  const pendingMarkRef = useRef<PendingMark | null>(null);
 
   // 防止并发请求 & 丢弃过期请求的结果
   const loadingRef = useRef(false);
@@ -503,16 +509,16 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
 
   // 每次重新聚焦（如从其它页面收藏后切回）时静默刷新，首次聚焦跳过
   const focusedOnceRef = useRef(false);
-  useFocusEffect(
-    useCallback(() => {
-      if (!focusedOnceRef.current) {
-        focusedOnceRef.current = true;
-        return;
-      }
-      if (loadingRef.current) return;
-      loadTabs('refresh');
-    }, [loadTabs])
-  );
+  // 本项目是自研导航栈：每次回到这个页面都会重新挂载，等价于「重新聚焦」
+  useEffect(() => {
+    if (!focusedOnceRef.current) {
+      focusedOnceRef.current = true;
+      return;
+    }
+    if (loadingRef.current) return;
+    loadTabs('refresh');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadTabs]);
 
   const handleRefresh = useCallback(() => loadTabs('refresh'), [loadTabs]);
 
@@ -530,7 +536,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
         },
         onCancel: () => {
           setDialog(null);
-          pendingMarkRef.current = null;
+          pendingMarkHolder = null;
         },
       });
     },
@@ -643,7 +649,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
   const handleMarkMastered = async (word: Word) => {
     // 非会员达到免费额度时先拦截，引导升级会员后再继续
     if (await runVipGate()) {
-      pendingMarkRef.current = { type: 'single', word };
+      pendingMarkHolder = { type: 'single', word };
       // 抛错走与上报失败相同的回滚：卡片滑回来
       throw new Error('VIP_GATE');
     }
@@ -682,7 +688,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
 
     if (!batch.length) {
       // 一个都标记不了：提示升级会员，剩下的等开通后自动继续
-      pendingMarkRef.current = { type: 'all', words: rest.length ? rest : targets };
+      pendingMarkHolder = { type: 'all', words: rest.length ? rest : targets };
       await runVipGate();
       return;
     }
@@ -709,7 +715,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
 
     if (rest.length) {
       // 免费额度用完了：剩下这些等会员开通后接着标记
-      pendingMarkRef.current = { type: 'all', words: rest };
+      pendingMarkHolder = { type: 'all', words: rest };
       await runVipGate();
     }
   };
@@ -750,37 +756,36 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
    * 从会员页返回：先刷新用户信息与会员状态，
    * 已开通会员就自动继续刚才被拦截的「单个标记 / 全部记住」。
    */
-  useFocusEffect(
-    useCallback(() => {
-      const pending = pendingMarkRef.current;
-      if (!pending) return;
-      (async () => {
-        clearVipGateCache();
+  // 自研栈里从会员页返回等于重新挂载，这里照样能继续刚才的标记
+  useEffect(() => {
+    const pending = pendingMarkHolder;
+    if (!pending) return;
+    void (async () => {
+      clearVipGateCache();
+      try {
+        await refreshUserInfo?.();
+      } catch {
+        // 刷新失败不阻断，下面仍会按最新接口结果判断
+      }
+      // silent 校验：没开通就丢弃待办，否则每次回到页面都会再弹一次升级弹窗
+      if (await runVipGate({ silent: true })) {
+        pendingMarkHolder = null;
+        return;
+      }
+      pendingMarkHolder = null;
+      showToast('会员已开通，继续标记');
+      if (pending.type === 'single') {
         try {
-          await refreshUserInfo?.();
+          await handleMarkMasteredRef.current(pending.word);
         } catch {
-          // 刷新失败不阻断，下面仍会按最新接口结果判断
+          // 继续失败时卡片已回滚，不再额外弹窗
         }
-        // silent 校验：没开通就丢弃待办，否则每次回到页面都会再弹一次升级弹窗
-        if (await runVipGate({ silent: true })) {
-          pendingMarkRef.current = null;
-          return;
-        }
-        pendingMarkRef.current = null;
-        showToast('会员已开通，继续标记');
-        if (pending.type === 'single') {
-          try {
-            await handleMarkMasteredRef.current(pending.word);
-          } catch {
-            // 继续失败时卡片已回滚，不再额外弹窗
-          }
-        } else {
-          await runMarkAllRef.current(pending.words);
-        }
-      })();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user, stats.masteredCount])
-  );
+      } else {
+        await runMarkAllRef.current(pending.words);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, stats.masteredCount]);
 
   const totalCount = tabs.all.total;
   const rememberedCount = tabs.mastered.total;
@@ -814,9 +819,9 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* 生词本现在是底部 Tab 页，没有上一级，不显示返回箭头 */}
       <Header
         title="生词本"
-        onBack={() => navigation.goBack()}
         subtitle={
           initialLoading && totalCount === 0
             ? '正在加载...'
@@ -859,7 +864,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
             <Ionicons
               name={showDetail ? 'eye-off-outline' : 'eye-outline'}
               size={15}
-              color={showDetail ? Colors.primary : Colors.textTertiary}
+              color={showDetail ? Colors.gold : Colors.textTertiary}
             />
             <Text style={[styles.ghostBtnText, showDetail && styles.ghostBtnTextActive]}>词义</Text>
           </TouchableOpacity>
@@ -869,7 +874,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
 
       {initialLoading && totalCount === 0 ? (
         <View style={styles.centerWrap}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+          <ActivityIndicator size="large" color={Colors.gold} />
           <Text style={styles.centerText}>正在加载生词本...</Text>
         </View>
       ) : null}
@@ -925,7 +930,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              tintColor={Colors.primary}
+              tintColor={Colors.gold}
             />
           }
           onEndReached={() => loadMore(activeTab)}
@@ -943,7 +948,7 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
             <>
               {activeState.loadingMore ? (
                 <View style={styles.footerLoading}>
-                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <ActivityIndicator size="small" color={Colors.gold} />
                 </View>
               ) : words.length && !activeState.hasMore ? (
                 <Text style={styles.footerText}>没有更多单词了</Text>
@@ -1010,7 +1015,7 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
   },
   segmentTextActive: {
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   topActions: {
     flexDirection: 'row',
@@ -1029,8 +1034,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   ghostBtnActive: {
-    backgroundColor: Colors.primaryLight,
-    borderColor: Colors.primary + '40',
+    backgroundColor: Colors.goldLight,
+    borderColor: Colors.gold + '40',
   },
   ghostBtnText: {
     fontSize: 12,
@@ -1038,7 +1043,7 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary,
   },
   ghostBtnTextActive: {
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   list: {
     flex: 1,
@@ -1088,7 +1093,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 13,
     lineHeight: 18,
-    color: Colors.primary,
+    color: Colors.goldDeep,
   },
   soundBtn: {
     marginLeft: 8,
@@ -1198,7 +1203,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 10,
     borderRadius: 22,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.goldDeep,
   },
   loginBtnText: {
     fontSize: 14,
