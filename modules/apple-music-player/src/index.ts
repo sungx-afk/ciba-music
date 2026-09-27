@@ -40,13 +40,17 @@ export function isPlayerAvailable(): boolean {
   return !!nativeModule()?.playSong;
 }
 
-let emitter: EventEmitter | null = null;
+function createEmitter(): any {
+  const mod = nativeModule();
+  if (!mod) throw new Error('AppleMusicPlayer 原生模块不可用');
+  return new EventEmitter(mod);
+}
 
-function getEmitter(): EventEmitter {
+let emitter: ReturnType<typeof createEmitter> | null = null;
+
+function getEmitter(): ReturnType<typeof createEmitter> {
   if (!emitter) {
-    const mod = nativeModule();
-    if (!mod) throw new Error('AppleMusicPlayer 原生模块不可用');
-    emitter = new EventEmitter(mod);
+    emitter = createEmitter();
   }
   return emitter;
 }

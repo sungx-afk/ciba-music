@@ -25,6 +25,7 @@ import { useMusicPlayer } from '../hooks/useMusicPlayer';
 import { useAppleMusicSubscription } from '../hooks/useAppleMusicSubscription';
 import { openAppleMusicSubscribe } from '../services/appleMusic';
 import { showToast } from '../utils/toast';
+import { WordLookupCard } from '../components/WordLookupCard';
 
 const TABS = ['歌词', '翻译', '学习', '词汇'];
 
@@ -86,6 +87,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   const [trackWidth, setTrackWidth] = useState(0);
   /** 示例模式没有音频，播放按钮只切个图标 */
   const [demoPlaying, setDemoPlaying] = useState(true);
+  /** 点中的歌词单词：非空时弹出查词卡片 */
+  const [lookupWord, setLookupWord] = useState<string | null>(null);
 
   const lyricRef = useRef<ScrollView | null>(null);
   /** 播完自动切歌时读的是最新状态，避免闭包里拿到旧值 */
@@ -282,6 +285,28 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
       return;
     }
     onOpen?.('Lyrics', { song: current, collectionName });
+  };
+
+  /**
+   * 把一行歌词拆成可点的单词：含字母的词加 onPress 查词，空格/标点原样输出。
+   * 点击只查词、不冒泡到整行的「点歌词跳转」，避免查词时顺带跳转播放进度。
+   */
+  const renderWordSpans = (text: string) => {
+    return text.split(/(\s+)/).map((part, i) => {
+      const word = part.replace(/[^A-Za-z']/g, '');
+      if (!word) return <Text key={`s-${i}`}>{part}</Text>;
+      return (
+        <Text
+          key={`w-${i}`}
+          onPress={(e: any) => {
+            e?.stopPropagation?.();
+            setLookupWord(word.toLowerCase());
+          }}
+        >
+          {part}
+        </Text>
+      );
+    });
   };
 
   const renderLyricLines = (zhOnly: boolean) => {
@@ -543,6 +568,9 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
 
       {/* 只有这一块滚动：歌词 / 翻译 / 学习 / 词汇 */}
       <View style={styles.panel}>{renderPanel()}</View>
+
+      {/* 点歌词中的单词 -> 查词卡片 */}
+      <WordLookupCard wordName={lookupWord} onClose={() => setLookupWord(null)} />
     </View>
   );
 };
