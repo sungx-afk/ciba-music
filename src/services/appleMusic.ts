@@ -40,8 +40,6 @@ const PROMPT_DISMISSED_KEY = 'appleMusic.promptDismissed';
 const PROMPT_SHOWN_KEY = 'appleMusic.promptShownCount';
 /** 缓存有效期：一天校准一次就够，用户中途订阅/退订还有 AppState 回前台补一次 */
 const CACHE_TTL = 24 * 60 * 60 * 1000;
-/** 提示最多出现几次（超过就不再打扰） */
-const MAX_PROMPT = 2;
 
 const UNKNOWN: SubscriptionInfo = {
   status: 'unknown',
@@ -127,24 +125,15 @@ export async function refreshSubscription(force = false): Promise<SubscriptionIn
 
 /**
  * 是否该弹「去订阅 Apple Music」的提示。
- * 只要：已编入原生模块 + 完成过一次检测 + 不是「已确认订阅」+ 没被永久关闭 + 次数没用完。
- * 放宽到 unknown 一起提示：真机上 unknown 多半是没登录 Apple Music，也值得引导。
+ * 现阶段：已编入原生模块 + 完成过一次检测 + 不是「已确认订阅」→ 就一直显示。
+ * （暂不做「最多 N 次 / 手动关闭」限制，方便非会员持续看到订阅入口；
+ *   对应的 markSubscribePromptShown / dismissSubscribePrompt 暂时不生效，保留备用。）
  */
 export async function shouldShowSubscribePrompt(): Promise<boolean> {
   if (!isSubscriptionModuleAvailable()) return false;
   // 还没完成过一次检测（updatedAt=0）时不提示，避免会员用户开屏闪一下引导条
   if (cached.updatedAt === 0) return false;
-  if (cached.status === 'subscribed') return false;
-  try {
-    const [dismissed, shown] = await Promise.all([
-      AsyncStorage.getItem(PROMPT_DISMISSED_KEY),
-      AsyncStorage.getItem(PROMPT_SHOWN_KEY),
-    ]);
-    if (dismissed === '1') return false;
-    return (Number(shown) || 0) < MAX_PROMPT;
-  } catch {
-    return false;
-  }
+  return cached.status !== 'subscribed';
 }
 
 /** 提示真的露出来以后计一次，避免无限打扰 */

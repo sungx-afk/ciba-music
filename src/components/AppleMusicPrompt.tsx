@@ -4,8 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { useAppleMusicSubscription } from '../hooks/useAppleMusicSubscription';
 import {
-  dismissSubscribePrompt,
-  markSubscribePromptShown,
   openAppleMusicSubscribe,
   shouldShowSubscribePrompt,
   APPLE_MUSIC_SUBSCRIBE_URL,
@@ -15,8 +13,9 @@ import { showToast } from '../utils/toast';
 
 /**
  * 非阻断的订阅引导条。
- * 只在「确认未订阅 / 未能确认订阅」时才可能露出来，且最多两次、可永久关闭；
+ * 只要不是「已确认订阅」就一直显示（含未登录 Apple Music 的 unknown 状态）；
  * 未编入原生模块（Expo Go / 安卓）时一律不显示。
+ * 右上角 × 只做「本次会话内隐藏」，不做永久关闭。
  *
  * TODO: 调试完成后把 SHOW_DEBUG 关掉（临时在首页显示原生检测结果，便于真机排查）
  */
@@ -32,7 +31,6 @@ export const AppleMusicPrompt: React.FC = () => {
       const ok = await shouldShowSubscribePrompt();
       if (!alive) return;
       setVisible(ok);
-      if (ok) await markSubscribePromptShown();
     })();
     return () => {
       alive = false;
@@ -48,9 +46,9 @@ export const AppleMusicPrompt: React.FC = () => {
     }
   };
 
-  const onClose = async () => {
+  const onClose = () => {
+    // 仅本次会话内隐藏；不做永久关闭，返回/切后台再回来仍会显示
     setVisible(false);
-    await dismissSubscribePrompt();
   };
 
   const debugEl = SHOW_DEBUG ? (
