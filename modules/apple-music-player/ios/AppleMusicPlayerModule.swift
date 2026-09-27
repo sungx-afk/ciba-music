@@ -12,8 +12,10 @@ import Foundation
  *   - App ID 勾选了 MusicKit 服务（自动 developer token）
  *   - 用户已订阅 Apple Music（canPlayCatalogContent = true）
  *
- * 注意：MusicKit 的 API 声明在不同 SDK 版本上有过变化（如 MusicSubscription.current 变成
- * async throws、MusicAuthorization.current 被移除），本文件尽量只用稳定 API 并做兜底。
+ * 注意（踩过的坑）：
+ *   - MusicPlayer 在较新 SDK 里是「类」而非协议，且 ApplicationMusicPlayer 继承自它；
+ *     不要显式写 `MusicPlayer.PlaybackStatus` 类型名，会 "ambiguous for type lookup"，改成内联 switch。
+ *   - 没有 seek(to:) 方法，跳转就是给可写的 playbackTime 赋值。
  */
 public final class AppleMusicPlayerModule: Module {
   /// 当前歌曲时长（秒），由 playSong 写入
@@ -79,9 +81,11 @@ public final class AppleMusicPlayerModule: Module {
         promise.resolve()
         return
       }
-      ApplicationMusicPlayer.shared.pause()
-      self.lastStatus = "paused"
-      promise.resolve()
+      Task { @MainActor in
+        ApplicationMusicPlayer.shared.pause()
+        self.lastStatus = "paused"
+        promise.resolve()
+      }
     }
 
     AsyncFunction("seek") { (seconds: Double, promise: Promise) in
@@ -90,12 +94,9 @@ public final class AppleMusicPlayerModule: Module {
         return
       }
       Task { @MainActor in
-        do {
-          try await ApplicationMusicPlayer.shared.seek(to: seconds)
-          promise.resolve()
-        } catch {
-          promise.reject("seek_failed", error.localizedDescription)
-        }
+        // MusicKit 没有 seek(to:)，跳转就是给可写的 playbackTime 赋值
+        ApplicationMusicPlayer.shared.playbackTime = max(0, seconds)
+        promise.resolve()
       }
     }
 
@@ -104,10 +105,12 @@ public final class AppleMusicPlayerModule: Module {
         promise.resolve()
         return
       }
-      ApplicationMusicPlayer.shared.stop()
-      self.lastStatus = "stopped"
-      self.stopPolling()
-      promise.resolve()
+      Task { @MainActor in
+        ApplicationMusicPlayer.shared.stop()
+        self.lastStatus = "stopped"
+        self.stopPolling()
+        promise.resolve()
+      }
     }
 
     OnDestroy {
@@ -134,10 +137,20 @@ public final class AppleMusicPlayerModule: Module {
   private func emitStatus() {
     guard #available(iOS 15.0, *) else { return }
     let player = ApplicationMusicPlayer.shared
-    let status = describePlaybackStatus(player.state.playbackStatus)
+    // 内联 switch：不再显式引用 MusicPlayer 类型，避免 ambiguous type lookup
+    let status: String
+    switch player.state.playbackStatus {
+    case .playing: status = "playing"
+    case .paused: status = "paused"
+    case .stopped: status = "stopped"
+    case .interrupted: status = "interrupted"
+    case .seekingForward, .seekingBackward: status = "playing"
+    @unknown default: status = "unknown"
+    }
+    let time = player.playbackTime
     var payload: [String: Any?] = [
       "status": status,
-      "position": player.playbackTime,
+      "position": time.isNaN ? 0 : time,
       "duration": currentDuration,
     ]
     // playing -> stopped 视为自然播完（手动 stop 时 lastStatus 不是 playing）
@@ -147,17 +160,5 @@ public final class AppleMusicPlayerModule: Module {
     }
     lastStatus = status
     sendEvent("onPlaybackStatus", payload)
-  }
-}
-
-@available(iOS 15.0, *)
-private func describePlaybackStatus(_ status: MusicPlayer.PlaybackStatus) -> String {
-  switch status {
-  case .playing: return "playing"
-  case .paused: return "paused"
-  case .stopped: return "stopped"
-  case .interrupted: return "interrupted"
-  case .seekingForward, .seekingBackward: return "playing"
-  @unknown default: return "unknown"
   }
 }
