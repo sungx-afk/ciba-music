@@ -10,13 +10,18 @@ import {
   shouldShowSubscribePrompt,
   APPLE_MUSIC_SUBSCRIBE_URL,
 } from '../services/appleMusic';
+import { isSubscriptionModuleAvailable } from '../../modules/apple-music-subscription';
 import { showToast } from '../utils/toast';
 
 /**
  * 非阻断的订阅引导条。
- * 只在「确认未订阅」时才可能露出来，且最多两次、可永久关闭；
- * 未知状态（安卓 / Expo Go / 没登录 Apple Music / 模拟器）一律不显示。
+ * 只在「确认未订阅 / 未能确认订阅」时才可能露出来，且最多两次、可永久关闭；
+ * 未编入原生模块（Expo Go / 安卓）时一律不显示。
+ *
+ * TODO: 调试完成后把 SHOW_DEBUG 关掉（临时在首页显示原生检测结果，便于真机排查）
  */
+const SHOW_DEBUG = true;
+
 export const AppleMusicPrompt: React.FC = () => {
   const subscription = useAppleMusicSubscription();
   const [visible, setVisible] = useState(false);
@@ -34,8 +39,6 @@ export const AppleMusicPrompt: React.FC = () => {
     };
   }, [subscription.status, subscription.updatedAt]);
 
-  if (!visible) return null;
-
   const onSubscribe = async () => {
     const opened = await openAppleMusicSubscribe();
     if (!opened) {
@@ -50,22 +53,36 @@ export const AppleMusicPrompt: React.FC = () => {
     await dismissSubscribePrompt();
   };
 
+  const debugEl = SHOW_DEBUG ? (
+    <Text style={styles.debug} numberOfLines={2}>
+      [AM] module={isSubscriptionModuleAvailable() ? 'yes' : 'no'} status={subscription.status} auth=
+      {subscription.authorizationStatus} cpc={subscription.canPlayCatalogContent ? 1 : 0} cbs=
+      {subscription.canBecomeSubscriber ? 1 : 0}
+      {subscription.error ? ` err=${subscription.error}` : ''}
+    </Text>
+  ) : null;
+
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={onSubscribe}>
-      <View style={styles.iconBox}>
-        <Ionicons name="musical-notes" size={16} color={Colors.primary} />
-      </View>
-      <View style={styles.textBox}>
-        <Text style={styles.title}>订阅 Apple Music，听完整版</Text>
-        <Text style={styles.sub}>现在播的是试听片段，订阅后解锁全曲与歌词跟读</Text>
-      </View>
-      <TouchableOpacity style={styles.cta} onPress={onSubscribe} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-        <Text style={styles.ctaText}>去订阅</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.close} onPress={onClose} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-        <Ionicons name="close" size={15} color={Colors.textMuted} />
-      </TouchableOpacity>
-    </TouchableOpacity>
+    <View>
+      {visible ? (
+        <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={onSubscribe}>
+          <View style={styles.iconBox}>
+            <Ionicons name="musical-notes" size={16} color={Colors.primary} />
+          </View>
+          <View style={styles.textBox}>
+            <Text style={styles.title}>订阅 Apple Music，听完整版</Text>
+            <Text style={styles.sub}>现在播的是试听片段，订阅后解锁全曲与歌词跟读</Text>
+          </View>
+          <TouchableOpacity style={styles.cta} onPress={onSubscribe} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+            <Text style={styles.ctaText}>去订阅</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.close} onPress={onClose} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+            <Ionicons name="close" size={15} color={Colors.textMuted} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
+      {debugEl}
+    </View>
   );
 };
 
@@ -103,4 +120,5 @@ const styles = StyleSheet.create({
   },
   ctaText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   close: { padding: 2 },
+  debug: { fontSize: 10, color: Colors.textMuted, marginTop: 6, lineHeight: 14 },
 });
