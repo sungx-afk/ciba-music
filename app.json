@@ -19,6 +19,7 @@
       "infoPlist": {
         "CFBundleDisplayName": "CibaMusic",
         "ITSAppUsesNonExemptEncryption": false,
+        "NSAppleMusicUsageDescription": "用于读取你的 Apple Music 订阅状态，以便播放完整歌曲与歌词跟读。",
         "CFBundleURLTypes": [
           {
             "CFBundleURLName": "weixin",
