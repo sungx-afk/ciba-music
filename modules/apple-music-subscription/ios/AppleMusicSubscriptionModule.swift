@@ -12,7 +12,12 @@ import MusicKit
  * 关键坑：MusicSubscription 的订阅状态是异步加载的。App 冷启动时第一次读
  * `MusicSubscription.current`，`canPlayCatalogContent` / `canBecomeSubscriber` 往往还都是 false，
  * 必须等它填充完成再判断，否则会稳定误判成 `unknown` 导致永远不提示。
- * 这里轮询一小段时间（最多 ~1.8s）等它加载，必要时再请求一次音乐授权兜底。
+ * 这里轮询一小段时间（最多 ~1.8s）等它加载。
+ *
+ * 注：早期版本曾用 `MusicAuthorization.current` 读取授权状态做区分，但新 SDK（Xcode 26 / iOS 26）
+ * 已移除该静态成员，编译会报 “type 'MusicAuthorization' has no member 'current'”。
+ * 订阅检测本身不依赖 App 的音乐授权，故此处去掉 MusicAuthorization 相关调用，
+ * authorizationStatus 暂恒为 "unknown"（仅为诊断字段，不影响 eligible 判定）。
  *
  * 前置条件：开发者后台给 App ID 勾上 MusicKit App Service（Automatic Developer Token
  * Generation 就靠这个开关，所以这里不需要自己签 developer token）。
@@ -32,35 +37,12 @@ public final class AppleMusicSubscriptionModule: Module {
         return
       }
       Task { @MainActor in
-        // 授权状态（只读，不弹系统框）：用于区分「没登录 Apple Music」与「真读不到」
-        let authStatusInitial = describeAuth(MusicAuthorization.current.status)
-
-        // 先不弹授权框，轮询等订阅状态加载完成
+        // 订阅状态异步加载：轮询等它填充完成，避免冷启动误判 unknown
         var subscription = MusicSubscription.current
         for _ in 0..<12 {
           if subscription.canPlayCatalogContent || subscription.canBecomeSubscriber { break }
           try? await Task.sleep(nanoseconds: 150_000_000)
           subscription = MusicSubscription.current
-        }
-
-        // 仍读不到（少数 iOS 版本需要授权后才会加载订阅）：请求一次音乐授权兜底
-        var authStatus = authStatusInitial
-        if !subscription.canPlayCatalogContent,
-          !subscription.canBecomeSubscriber,
-          authStatusInitial == "notDetermined" {
-          if #available(iOS 15.4, *) {
-            do {
-              let determined = try await MusicAuthorization.request()
-              authStatus = describeAuth(determined)
-            } catch {
-              // 授权失败不影响本次返回
-            }
-            for _ in 0..<6 {
-              if subscription.canPlayCatalogContent || subscription.canBecomeSubscriber { break }
-              try? await Task.sleep(nanoseconds: 150_000_000)
-              subscription = MusicSubscription.current
-            }
-          }
         }
 
         let status: String
@@ -74,23 +56,12 @@ public final class AppleMusicSubscriptionModule: Module {
 
         promise.resolve([
           "status": status,
-          "authorizationStatus": authStatus,
+          "authorizationStatus": "unknown",
           "canPlayCatalogContent": subscription.canPlayCatalogContent,
           "canBecomeSubscriber": subscription.canBecomeSubscriber,
           "hasCloudLibraryEnabled": subscription.hasCloudLibraryEnabled,
         ])
       }
     }
-  }
-}
-
-@available(iOS 15.0, *)
-private func describeAuth(_ status: MusicAuthorization.Status) -> String {
-  switch status {
-  case .authorized: return "authorized"
-  case .denied: return "denied"
-  case .restricted: return "restricted"
-  case .notDetermined: return "notDetermined"
-  @unknown default: return "unknown"
   }
 }
