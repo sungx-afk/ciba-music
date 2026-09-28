@@ -17,6 +17,7 @@ import { MusicApi, MusicSong, formatDuration } from '../services/musicApi';
 import { getLocalSongs, subscribeLocalSongs, mapAppleSongToMusicSong } from '../services/localPlaylist';
 import { clearVipGateCache, isVipUser, FREE_SONG_LIMIT } from '../services/vipGate';
 import { useAuth } from '../context/AuthContext';
+import { ConfirmDialog, DialogPayload } from '../components/ConfirmDialog';
 import { playPreview, stopPreview } from '../utils/audioPreview';
 import { showToast } from '../utils/toast';
 
@@ -45,6 +46,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   /** 当前账号是否会员：非会员只能看到前 FREE_SONG_LIMIT 首 */
   const { user } = useAuth();
   const [isVip, setIsVip] = useState(() => Number((user as any)?.vip) === 1);
+  /** 会员限制类的统一弹窗（如非会员点「添加」） */
+  const [dialog, setDialog] = useState<DialogPayload | null>(null);
 
   const [songs, setSongs] = useState<MusicSong[]>([]);
   /** 本地从 Apple Music 加入的歌曲（临时存储，后续接后端接口替换） */
@@ -246,6 +249,17 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   };
 
   const openSearch = () => {
+    // 非会员不能往歌单里加歌：弹开通提示
+    if (!isVip) {
+      setDialog({
+        title: '需要升级 VIP 会员',
+        message: '开通会员后才能往歌单里添加歌曲',
+        confirmText: '去开通',
+        onConfirm: () => onOpen?.('Purchase'),
+        onCancel: () => setDialog(null),
+      });
+      return;
+    }
     onOpen?.('SearchSong', { collectionId, collectionName });
   };
 
@@ -378,6 +392,10 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
       </View>
 
       {renderList()}
+
+      {dialog && (
+        <ConfirmDialog visible onClose={() => setDialog(null)} {...dialog} />
+      )}
     </View>
   );
 };
