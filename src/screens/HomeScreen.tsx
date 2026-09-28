@@ -120,21 +120,32 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
         {/* 未订阅 Apple Music 时的非阻断引导（内部自己判断要不要显示） */}
         <AppleMusicPrompt />
 
-        <LinearGradient
-          colors={homeBanner.colors}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.banner}
+        {/* 点「用音乐学英语」banner → 进入每日推荐歌曲页 */}
+        <TouchableOpacity
+          activeOpacity={0.96}
+          onPress={() => onOpen('DailyRecommend')}
+          style={styles.bannerTouch}
         >
-          <View style={styles.bannerGlow} />
-          <View style={styles.bannerText}>
-            <Text style={styles.bannerTitle}>{homeBanner.title}</Text>
-            <Text style={styles.bannerDesc}>{homeBanner.desc}</Text>
-          </View>
-          <TouchableOpacity style={styles.bannerPlay} onPress={() => onOpen('Player')}>
-            <Ionicons name="play" size={16} color="#fff" />
-          </TouchableOpacity>
-        </LinearGradient>
+          <LinearGradient
+            colors={homeBanner.colors}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.banner}
+          >
+            <View style={styles.bannerGlow} />
+            <View style={styles.bannerText}>
+              <Text style={styles.bannerTitle}>{homeBanner.title}</Text>
+              <Text style={styles.bannerDesc}>{homeBanner.desc}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.bannerPlay}
+              activeOpacity={0.9}
+              onPress={() => onOpen('DailyRecommend')}
+            >
+              <Ionicons name="play" size={16} color="#fff" />
+            </TouchableOpacity>
+          </LinearGradient>
+        </TouchableOpacity>
 
         {/* 最近播放：只有播过歌才出现，不占没用过的用户的版面 */}
         {recent.items.length > 0 ? (
@@ -311,6 +322,11 @@ const styles = StyleSheet.create({
      * 提示条自己只有 marginTop，别再让它管底部间距，否则真机上会和 banner 贴在一起。
      */
     marginTop: 12,
+  },
+  /** 外层可点击容器：裁剪圆角，让渐变背景被一起圆角裁掉 */
+  bannerTouch: {
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   bannerGlow: {
     position: 'absolute',

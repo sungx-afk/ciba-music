@@ -14,6 +14,7 @@ import { ListeningScreen } from '../screens/ListeningScreen';
 import { ShadowingScreen } from '../screens/ShadowingScreen';
 import { AIScreen } from '../screens/AIScreen';
 import { CollectionDetailScreen } from '../screens/CollectionDetailScreen';
+import { DailyRecommendScreen } from '../screens/DailyRecommendScreen';
 import { SearchSongScreen } from '../screens/SearchSongScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
@@ -69,6 +70,8 @@ export const AppShell: React.FC = () => {
         return <AIScreen onBack={back} />;
       case 'Collection':
         return <CollectionDetailScreen params={current.params} onOpen={open} onBack={back} />;
+      case 'DailyRecommend':
+        return <DailyRecommendScreen onOpen={open} onBack={back} />;
       case 'SearchSong':
         return <SearchSongScreen params={current.params} onBack={back} />;
       case 'Login':
