@@ -305,6 +305,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
+    /**
+     * 顶部间距由 banner 自己负责（它是常驻的，订阅提示条不一定显示）：
+     * 提示条显示时 → 搜索框 12 + 提示条 + 12 + banner；隐藏时 → 搜索框 12 + banner。
+     * 提示条自己只有 marginTop，别再让它管底部间距，否则真机上会和 banner 贴在一起。
+     */
+    marginTop: 12,
   },
   bannerGlow: {
     position: 'absolute',
