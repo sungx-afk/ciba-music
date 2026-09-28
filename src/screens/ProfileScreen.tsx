@@ -16,6 +16,8 @@ import { Colors } from '../theme/colors';
 import { ConfirmDialog, DialogPayload } from '../components/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
 import { useProgress } from '../storage/progressStore';
+import { AuthApi } from '../services/api';
+import { clearLocalAccountData } from '../services/accountCleanup';
 import {
   fetchNotebookDayLimit,
   saveNotebookDayLimit,
@@ -26,14 +28,6 @@ import { AGREEMENT_URL, POLICY_URL } from '../config/legal';
 
 /** 与 package.json 同步，避免审核员看到不一致的版本号 */
 const APP_VERSION = '1.0.0';
-
-/** 常用功能入口 */
-const MENU: { key: string; label: string; icon: string }[] = [
-  { key: 'fav', label: '我的收藏', icon: 'heart-outline' },
-  { key: 'vocab', label: '生词本', icon: 'book-outline' },
-  { key: 'record', label: '学习记录', icon: 'time-outline' },
-  { key: 'settings', label: '设置', icon: 'settings-outline' },
-];
 
 /** 手机号脱敏：138****8888 */
 const maskMobile = (m?: string) => {
@@ -47,8 +41,10 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
   /** 顶部避开状态栏（底部由 TabBar 负责） */
   const insets = useSafeAreaInsets();
   const { user, isLoggedIn, logout, refreshUserInfo } = useAuth();
-  const { state: progress, stats, updateSettings } = useProgress();
+  const { state: progress, stats, updateSettings, logout: progressLogout } = useProgress();
   const [dialog, setDialog] = useState<DialogPayload | null>(null);
+  /** 注销账号提交中的防重入标记 */
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   /** 用户资料里的 vip 字段为 1 表示付费会员 */
   const isVip = Number(user?.vip) === 1;
@@ -70,6 +66,7 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
     ? maskMobile(user?.mobile) || user?.email || '学习进度已开启多端同步'
     : '登录后可同步学习进度与会员权益';
 
+  /** 头部退出登录：弹窗二次确认 */
   const handleLogout = () => {
     setDialog({
       title: '退出登录',
@@ -174,23 +171,120 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
     updateSettings({ autoPronounce: value });
   };
 
-  /** 学习统计：连续打卡 / 已掌握 / 今日学习 / 待复习（真实数据来自 progressStore） */
+  /** 学习统计：连续打卡 / 已掌握单词（真实数据来自 progressStore） */
   const studyStats = [
     { k: '连续打卡', v: String(stats.streakDays), u: '天' },
     { k: '已掌握单词', v: String(stats.masteredCount), u: '个' },
-    { k: '今日学习', v: String(stats.todayLearnedCount), u: '个' },
-    { k: '待复习', v: String(stats.dueTodayCount), u: '个' },
   ];
+
+  /**
+   * 注销账号入口（苹果审核 5.1.1(v) 要求）。
+   * 两步弹窗：1) 告知后果（不可恢复）；2) 用户再次确认后真正提交。
+   */
+  const handleDeleteAccount = () => {
+    if (!isLoggedIn) {
+      setDialog({
+        title: '尚未登录',
+        message: '当前为游客模式，没有可注销的账号。',
+        showCancel: false,
+        confirmText: '知道了',
+        onConfirm: () => setDialog(null),
+      });
+      return;
+    }
+    setDialog({
+      title: '注销账号',
+      message:
+        '注销账号后，你在糍粑音乐内的全部学习记录、生词本、会员订阅都会被永久删除且不可恢复。该操作无法撤销。\n\n是否继续？',
+      confirmText: '我已知悉，继续',
+      cancelText: '我再想想',
+      onConfirm: () => {
+        setDialog({
+          title: '请再次确认',
+          message: '确认要永久注销当前账号吗？注销后将无法用当前手机号/邮箱找回任何数据。',
+          confirmText: '确认注销',
+          cancelText: '取消',
+          onConfirm: performDeleteAccount,
+        });
+      },
+      onCancel: () => setDialog(null),
+    });
+  };
+
+  /** 真正提交注销：服务端删除必须成功，成功后才清本地 + 退出登录态 */
+  const performDeleteAccount = async () => {
+    if (deletingAccount) return;
+    setDeletingAccount(true);
+    const userId = (user as any)?.id ?? '';
+    try {
+      // 1) 服务端：必须成功（result 0/1）。失败直接终止，不清本地，避免
+      //    「服务端还保留账号但本地已清」的脏状态（苹果 5.1.1(v) 严格条款）
+      let serverOk = false;
+      try {
+        const res = await AuthApi.deleteAccount();
+        if (res && typeof res.result === 'number' && (res.result === 0 || res.result === 1)) {
+          serverOk = true;
+        } else {
+          console.warn('[注销] 服务端返回非成功：', res);
+        }
+      } catch (e) {
+        console.warn('[注销] 服务端调用失败', e);
+      }
+
+      if (!serverOk) {
+        setDialog({
+          title: '注销失败',
+          message:
+            '未能与服务器完成注销，为避免账号数据残留，请稍后再试或联系客服处理。',
+          confirmText: '我知道了',
+          cancelText: '再试一次',
+          onConfirm: () => setDialog(null),
+          onCancel: () => {
+            setDialog(null);
+            // 让用户立即重试一次
+            setTimeout(() => performDeleteAccount(), 50);
+          },
+        });
+        return;
+      }
+
+      // 2) 服务端已删，再清本地（彻底删磁盘数据，不仅是内存）
+      await clearLocalAccountData(userId);
+
+      // 3) 退出登录态（清 token / userInfo / 进度内存）
+      try {
+        await logout();
+      } catch (_) {}
+      try {
+        await progressLogout();
+      } catch (_) {}
+
+      // 4) 提示
+      setDialog({
+        title: '账号已注销',
+        message: '你的账号与本机数据已清除。如需继续使用，请重新注册。',
+        showCancel: false,
+        confirmText: '好的',
+        onConfirm: () => setDialog(null),
+      });
+    } catch (e: any) {
+      setDialog({
+        title: '注销失败',
+        message: e?.message || '注销过程中出现异常，请稍后重试或联系客服',
+        showCancel: false,
+        confirmText: '知道了',
+        onConfirm: () => setDialog(null),
+      });
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {/* 用户信息：头像 + 昵称 + 会员状态，未登录时整块作为登录入口 */}
-        <TouchableOpacity
-          style={styles.userCard}
-          activeOpacity={isLoggedIn ? 1 : 0.7}
-          onPress={() => !isLoggedIn && open('Login')}
-        >
+        {/* 用户信息：头像 + 昵称 + 会员状态；登录态右侧放退出按钮，未登录放登录按钮 */}
+        <View style={styles.userCard}>
           {user?.avatarUrl ? (
             <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
           ) : (
@@ -213,7 +307,11 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
               />
             </LinearGradient>
           )}
-          <View style={styles.userInfo}>
+          <TouchableOpacity
+            style={styles.userInfo}
+            activeOpacity={isLoggedIn ? 1 : 0.7}
+            onPress={() => !isLoggedIn && open('Login')}
+          >
             <Text style={styles.name} numberOfLines={1}>
               {displayName}
             </Text>
@@ -230,11 +328,26 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
             <Text style={styles.userSub} numberOfLines={1}>
               {displaySub}
             </Text>
-          </View>
-          {isLoggedIn ? null : (
-            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+          </TouchableOpacity>
+          {isLoggedIn ? (
+            <TouchableOpacity
+              style={styles.logoutBtn}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="log-out-outline" size={18} color={Colors.danger} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.loginBtnSmall}
+              onPress={() => open('Login')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.loginBtnSmallText}>登录</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+        </View>
 
         {/* 学习统计 */}
         <View style={styles.sectionCard}>
@@ -340,26 +453,6 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
           </View>
         </View>
 
-        {/* 功能列表 */}
-        <View style={styles.menuCard}>
-          {MENU.map((m, i) => (
-            <TouchableOpacity
-              key={m.key}
-              style={[styles.menuRow, i > 0 && styles.menuDivider]}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={m.icon as any}
-                size={20}
-                color={Colors.textSub}
-                style={styles.menuIcon}
-              />
-              <Text style={styles.menuText}>{m.label}</Text>
-              <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
-          ))}
-        </View>
-
         {/* 关于 */}
         <View style={styles.sectionCard}>
           <Text style={styles.cardHeaderTitle}>关于</Text>
@@ -387,48 +480,24 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
           </TouchableOpacity>
-        </View>
 
-        {/* 账号相关：登录 / 注册 / 修改密码 / 退出登录 */}
-        <View style={styles.menuCard}>
+          {/* 苹果审核 5.1.1(v) 要求：登录账号必须可在 App 内注销。仅登录态可见 */}
           {isLoggedIn ? (
-            <>
-              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => open('ChangePassword')}>
-                <Ionicons
-                  name="key-outline"
-                  size={20}
-                  color={Colors.textSub}
-                  style={styles.menuIcon}
-                />
-                <Text style={styles.menuText}>修改密码</Text>
-                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.menuRow, styles.menuDivider]}
-                activeOpacity={0.7}
-                onPress={handleLogout}
-              >
-                <Ionicons
-                  name="log-out-outline"
-                  size={20}
-                  color={Colors.danger}
-                  style={styles.menuIcon}
-                />
-                <Text style={[styles.menuText, styles.logoutText]}>退出登录</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => open('Login')}>
-              <Ionicons
-                name="log-in-outline"
-                size={20}
-                color={Colors.blue}
-                style={styles.menuIcon}
-              />
-              <Text style={[styles.menuText, styles.loginText]}>登录 / 注册</Text>
+            <TouchableOpacity
+              style={[styles.actionRow, styles.borderTop]}
+              onPress={handleDeleteAccount}
+              activeOpacity={0.7}
+              disabled={deletingAccount}
+            >
+              <View style={styles.actionLeft}>
+                <Ionicons name="trash-outline" size={20} color={Colors.danger} />
+                <Text style={[styles.actionLabel, styles.dangerLabel]}>
+                  {deletingAccount ? '正在注销…' : '注销账号'}
+                </Text>
+              </View>
               <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
-          )}
+          ) : null}
         </View>
 
         <View style={styles.aboutFooter}>
@@ -451,7 +520,11 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 28 },
 
   // 用户信息
-  userCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
   avatar: {
     width: 64,
     height: 64,
@@ -476,6 +549,15 @@ const styles = StyleSheet.create({
   vipPill: { backgroundColor: Colors.goldLight },
   vipText: { color: Colors.goldDeep },
   userSub: { fontSize: 12, color: Colors.textMuted, marginTop: 8 },
+  // 头部右侧：登录态的退出按钮 / 未登录的登录按钮
+  logoutBtn: { padding: 8 },
+  loginBtnSmall: {
+    backgroundColor: Colors.blue,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  loginBtnSmallText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 
   // 卡片通用
   sectionCard: {
@@ -570,26 +652,6 @@ const styles = StyleSheet.create({
   accentText: { fontSize: 12, fontWeight: '600', color: Colors.textSub },
   accentTextActive: { color: Colors.blue },
 
-  // 功能列表
-  menuCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    marginTop: 16,
-    shadowColor: Colors.text,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  menuRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
-  menuDivider: { borderTopWidth: 1, borderTopColor: Colors.divider },
-  // 图标只作固定宽的占位，保证各行文字左对齐
-  menuIcon: { width: 24, marginRight: 12 },
-  menuText: { flex: 1, fontSize: 14, fontWeight: '600', color: Colors.text },
-  loginText: { color: Colors.blueDeep },
-  logoutText: { color: Colors.danger },
-
   // 关于
   actionRow: {
     flexDirection: 'row',
@@ -599,6 +661,7 @@ const styles = StyleSheet.create({
   },
   actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   actionLabel: { fontSize: 14, fontWeight: '600', color: Colors.text },
+  dangerLabel: { color: Colors.danger },
 
   aboutFooter: { alignItems: 'center', paddingVertical: 20 },
   aboutText: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
