@@ -85,7 +85,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   const { user } = useAuth();
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
-  const [liked, setLiked] = useState(false);
+  /** 标记本歌「学习完成」：状态先本地保存，落库接口后续对接 */
+  const [done, setDone] = useState(false);
   const [tab, setTab] = useState('歌词');
   const [trackWidth, setTrackWidth] = useState(0);
   /** 示例模式没有音频，播放按钮只切个图标 */
@@ -295,6 +296,13 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     if (!opened) showToast('暂时打不开订阅页，之后可以在首页再试', 'info');
   };
 
+  /** 标记 / 取消「本歌学习完成」；落库接口后续对接，先本地状态 + 提示 */
+  const toggleDone = () => {
+    const next = !done;
+    setDone(next);
+    showToast(next ? '已标记为完成' : '已取消完成', 'success');
+  };
+
   const onTrackPress = (event: any) => {
     if (!trackWidth || !timelineDuration) return;
     const x = Number(event?.nativeEvent?.locationX ?? 0);
@@ -456,17 +464,9 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
         <TouchableOpacity onPress={onBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <View style={styles.topRight}>
-          <TouchableOpacity onPress={() => setLiked(!liked)}>
-            <Ionicons name={liked ? 'heart' : 'heart-outline'} size={21} color={liked ? S.gold : '#fff'} />
-          </TouchableOpacity>
-          <TouchableOpacity>
-            <Ionicons name="ellipsis-horizontal" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
       </View>
 
-      {/* 歌曲信息（简化：缩小封面，只留歌名 + 作者） */}
+      {/* 歌曲信息（简化：缩小封面，只留歌名 + 作者；右侧「完成」标记） */}
       <View style={styles.headRow}>
         {coverUrl ? (
           <Image source={{ uri: coverUrl }} style={styles.cover} />
@@ -483,6 +483,18 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
             {artist}
           </Text>
         </View>
+        <TouchableOpacity
+          style={[styles.doneBtn, done && styles.doneBtnOn]}
+          onPress={toggleDone}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name={done ? 'checkmark-circle' : 'checkmark-circle-outline'}
+            size={18}
+            color={done ? S.gold : '#fff'}
+          />
+          <Text style={[styles.doneText, done && styles.doneTextOn]}>{done ? '已完成' : '完成'}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* 分区：歌词 / 翻译 / 学习要点 */}
@@ -635,6 +647,20 @@ const styles = StyleSheet.create({
   headInfo: { flex: 1, marginLeft: 12 },
   songTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
   songArtist: { fontSize: 12, color: S.textSub, marginTop: 4 },
+  /** 右侧「完成 / 已完成」标记 */
+  doneBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  doneBtnOn: { backgroundColor: 'rgba(245,197,66,0.16)', borderColor: S.gold },
+  doneText: { fontSize: 13, color: '#fff', fontWeight: '600' },
+  doneTextOn: { color: S.gold },
   songAlbum: { fontSize: 11, color: S.muted, marginTop: 4 },
   tagRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   levelTag: { backgroundColor: S.accent, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
