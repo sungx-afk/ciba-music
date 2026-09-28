@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -47,6 +48,13 @@ function coverLetter(title: string): string {
   return t ? t.charAt(0).toUpperCase() : '♪';
 }
 
+/** 按当前小时段返回问候语（前端本地算，无需接口） */
+function greetingByHour(hour: number): { text: string; emoji: string } {
+  if (hour >= 5 && hour < 12) return { text: 'Good morning', emoji: '👋' };
+  if (hour >= 12 && hour < 18) return { text: 'Good afternoon', emoji: '☀️' };
+  return { text: 'Good evening', emoji: '🌙' };
+}
+
 export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
   /** 真机状态栏会压住问候语，顶部留出安全区（底部由 TabBar 负责） */
   const insets = useSafeAreaInsets();
@@ -57,6 +65,21 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
   /** 最近播放：自己订阅变更，播放页写入后这里自动刷新 */
   const recent = useRecentPlays();
   const [showClearRecent, setShowClearRecent] = useState(false);
+
+  /** 顶部问候语随时间段变化：上午 / 下午 / 晚上，每分钟校准一次 */
+  const [greeting, setGreeting] = useState(() => greetingByHour(new Date().getHours()));
+  useEffect(() => {
+    const id = setInterval(() => setGreeting(greetingByHour(new Date().getHours())), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  /** 顶部搜索框输入：空 → 正常首页；非空 → 本地过滤精选歌单（后续替换为接口搜索） */
+  const [query, setQuery] = useState('');
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return collections.filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(q));
+  }, [query, collections]);
 
   const load = useCallback(async (silent = false) => {
     if (silent) {
@@ -95,30 +118,100 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
     onOpen('Player', { song, playlist: [song] });
   };
 
+  /** 歌单卡片：首页「精选歌单」与搜索结果共用 */
+  const renderCollectionCard = (item: MusicCollection) => (
+    <TouchableOpacity
+      key={item.id}
+      style={styles.collectionCard}
+      activeOpacity={0.85}
+      onPress={() => openCollection(item)}
+    >
+      {item.coverUrl ? (
+        <Image source={{ uri: item.coverUrl }} style={styles.cover} />
+      ) : (
+        <LinearGradient colors={['#8FB2FF', '#3D5AFE']} style={[styles.cover, styles.coverFallback]}>
+          <Ionicons name="musical-notes" size={22} color="rgba(255,255,255,0.9)" />
+        </LinearGradient>
+      )}
+      <View style={styles.collectionInfo}>
+        <Text style={styles.collectionName} numberOfLines={2}>
+          {item.name}
+        </Text>
+        <Text style={styles.collectionDesc} numberOfLines={2}>
+          {item.description}
+        </Text>
+        <View style={styles.metaRow}>
+          <View style={styles.countTag}>
+            <Ionicons name="musical-note" size={10} color={Colors.blueDeep} />
+            <Text style={styles.countText}>{item.songCount} 首</Text>
+          </View>
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.greetRow}>
           <View style={styles.greetText}>
-            <Text style={styles.greeting}>Good morning 👋</Text>
+            <Text style={styles.greeting}>
+              {greeting.text} {greeting.emoji}
+            </Text>
             <Text style={styles.subGreeting}>让好听的歌，成为你的英语课堂</Text>
           </View>
           <TouchableOpacity style={styles.bellBtn}>
             <Ionicons name="notifications-outline" size={18} color={Colors.text} />
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.searchBox} activeOpacity={0.8}>
+        <View style={styles.searchBox}>
           <Ionicons name="search" size={16} color={Colors.textMuted} />
-          <Text style={styles.searchText}>搜索歌曲、歌手或专辑...</Text>
-        </TouchableOpacity>
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="搜索歌曲、歌手或专辑..."
+            placeholderTextColor={Colors.textMuted}
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+          {query ? (
+            <TouchableOpacity
+              style={styles.searchClear}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              onPress={() => setQuery('')}
+            >
+              <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
       <ScrollView
         contentContainerStyle={styles.body}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
       >
-        {/* 未订阅 Apple Music 时的非阻断引导（内部自己判断要不要显示） */}
-        <AppleMusicPrompt />
+        {query.trim() ? (
+          <View>
+            <View style={styles.resultHead}>
+              <Text style={styles.resultTitle}>搜索结果</Text>
+              <Text style={styles.resultCount}>{results.length} 个歌单</Text>
+            </View>
+            {results.length === 0 ? (
+              <View style={styles.stateBox}>
+                <Ionicons name="search-outline" size={26} color={Colors.textMuted} />
+                <Text style={styles.stateText}>没有找到「{query.trim()}」相关的歌单</Text>
+              </View>
+            ) : (
+              results.map(renderCollectionCard)
+            )}
+          </View>
+        ) : (
+          <>
+            {/* 未订阅 Apple Music 时的非阻断引导（内部自己判断要不要显示） */}
+            <AppleMusicPrompt />
 
         {/* 点「用音乐学英语」banner → 进入每日推荐歌曲页 */}
         <TouchableOpacity
@@ -230,42 +323,9 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
           </View>
         ) : null}
 
-        {!loading && !error
-          ? collections.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.collectionCard}
-                activeOpacity={0.85}
-                onPress={() => openCollection(item)}
-              >
-                {item.coverUrl ? (
-                  <Image source={{ uri: item.coverUrl }} style={styles.cover} />
-                ) : (
-                  <LinearGradient
-                    colors={['#8FB2FF', '#3D5AFE']}
-                    style={[styles.cover, styles.coverFallback]}
-                  >
-                    <Ionicons name="musical-notes" size={22} color="rgba(255,255,255,0.9)" />
-                  </LinearGradient>
-                )}
-                <View style={styles.collectionInfo}>
-                  <Text style={styles.collectionName} numberOfLines={2}>
-                    {item.name}
-                  </Text>
-                  <Text style={styles.collectionDesc} numberOfLines={2}>
-                    {item.description}
-                  </Text>
-                  <View style={styles.metaRow}>
-                    <View style={styles.countTag}>
-                      <Ionicons name="musical-note" size={10} color={Colors.blueDeep} />
-                      <Text style={styles.countText}>{item.songCount} 首</Text>
-                    </View>
-                  </View>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
-            ))
-          : null}
+        {!loading && !error ? collections.map(renderCollectionCard) : null}
+          </>
+        )}
       </ScrollView>
 
       <ConfirmDialog
@@ -307,7 +367,24 @@ const styles = StyleSheet.create({
     height: 40,
     marginTop: 14,
   },
-  searchText: { color: Colors.textMuted, fontSize: 13 },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: Colors.text,
+    paddingVertical: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginLeft: 2,
+  },
+  searchClear: { padding: 2 },
+  resultHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  resultTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
+  resultCount: { fontSize: 12, color: Colors.textMuted },
   body: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24 },
   banner: {
     height: 116,
