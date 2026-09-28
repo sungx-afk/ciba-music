@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { MusicApi, MusicSong, formatDuration } from '../services/musicApi';
+import { getLocalSongs, subscribeLocalSongs, mapAppleSongToMusicSong } from '../services/localPlaylist';
 import { playPreview, stopPreview } from '../utils/audioPreview';
 import { showToast } from '../utils/toast';
 
@@ -42,6 +43,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   const coverUrl = String(params?.coverUrl || '');
 
   const [songs, setSongs] = useState<MusicSong[]>([]);
+  /** 本地从 Apple Music 加入的歌曲（临时存储，后续接后端接口替换） */
+  const [localSongs, setLocalSongs] = useState<MusicSong[]>([]);
   const [total, setTotal] = useState(Number(params?.songCount) || 0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -90,15 +93,36 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
     };
   }, [load]);
 
+  /** 本地从 Apple Music 加入的歌曲：挂载读取 + 订阅搜索页的添加事件刷新 */
+  useEffect(() => {
+    let alive = true;
+    const reloadLocal = async () => {
+      const list = await getLocalSongs(collectionId);
+      if (alive) setLocalSongs(list.map(mapAppleSongToMusicSong));
+    };
+    void reloadLocal();
+    const unsub = subscribeLocalSongs(collectionId, reloadLocal);
+    return () => {
+      alive = false;
+      unsub();
+    };
+  }, [collectionId]);
+
+  /**
+   * 展示列表 = 本地加入的歌曲（头部）+ 后端歌单歌曲。
+   * 分页游标、hasMore 仍只用后端 songs，本地歌曲不参与翻页。
+   */
+  const displaySongs = useMemo(() => [...localSongs, ...songs], [localSongs, songs]);
+
   /**
    * 分区过滤。
    * 后端目前还没有下发学习状态字段，此时两个 tab 都展示全部歌曲（不至于看起来像坏了）；
    * 一旦响应里带上 studyStatus（2 = 已学习），就自动按 tab 分流。
    */
-  const hasStudyStatus = songs.some((s) => s.studyStatus !== undefined && s.studyStatus !== null);
+  const hasStudyStatus = displaySongs.some((s) => s.studyStatus !== undefined && s.studyStatus !== null);
   const visibleSongs = hasStudyStatus
-    ? songs.filter((s) => (tab === 'learned' ? s.studyStatus === 2 : s.studyStatus !== 2))
-    : songs;
+    ? displaySongs.filter((s) => (tab === 'learned' ? s.studyStatus === 2 : s.studyStatus !== 2))
+    : displaySongs;
 
   const hasMore = songs.length > 0 && songs.length < total;
 
@@ -286,7 +310,7 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
           <Text style={styles.heroName} numberOfLines={2}>
             {collectionName}
           </Text>
-          <Text style={styles.heroCount}>{total ? `${total} 首歌曲` : '歌曲列表'}</Text>
+          <Text style={styles.heroCount}>{total + localSongs.length ? `${total + localSongs.length} 首歌曲` : '歌曲列表'}</Text>
         </View>
       </View>
 

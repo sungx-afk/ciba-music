@@ -18,6 +18,7 @@ import { Colors } from '../theme/colors';
 import { formatDuration } from '../services/musicApi';
 import { showToast } from '../utils/toast';
 import { isPlayerAvailable, searchSongs, AppleMusicSong } from '../../modules/apple-music-player';
+import { addLocalSong } from '../services/localPlaylist';
 
 /**
  * 搜索并添加歌曲：关键词 → 在 Apple Music 目录里搜索（MusicKit）。
@@ -39,6 +40,7 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
   /** 顶部避开状态栏、底部避开 Home Indicator */
   const insets = useSafeAreaInsets();
   const collectionName = String(params?.collectionName || '歌单');
+  const collectionId = Number(params?.collectionId);
   const [keyword, setKeyword] = useState('');
   const trimmed = keyword.trim();
 
@@ -87,9 +89,21 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
     return () => clearTimeout(timer);
   }, [trimmed, musicAvailable]);
 
-  const handleAdd = (song: AppleMusicSong) => {
-    // TODO: 接入「添加歌曲到歌单」接口（需后端接受 appleId 歌曲，数据模型 MusicTrack 已带 appleId / applePreviewUrl）
-    showToast(`「${song.title}」已选择（Apple Music），添加接口待接入`, 'info');
+  const handleAdd = async (song: AppleMusicSong) => {
+    if (!collectionId) {
+      showToast('该歌单暂不支持添加', 'info');
+      return;
+    }
+    try {
+      // 临时本地加入：去重后写入 AsyncStorage，详情页会合并展示（后续接后端接口替换此逻辑）
+      const added = await addLocalSong(collectionId, song);
+      showToast(
+        added ? `已添加到「${collectionName}」` : '这首歌已经在歌单里了',
+        'info',
+      );
+    } catch {
+      showToast('添加失败，请重试', 'info');
+    }
   };
 
   const renderRow: ListRenderItem<AppleMusicSong> = ({ item }) => (
