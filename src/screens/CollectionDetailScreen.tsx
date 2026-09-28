@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { MusicApi, MusicSong, formatDuration } from '../services/musicApi';
 import { getLocalSongs, subscribeLocalSongs, mapAppleSongToMusicSong } from '../services/localPlaylist';
+import { clearVipGateCache, isVipUser, FREE_SONG_LIMIT } from '../services/vipGate';
+import { useAuth } from '../context/AuthContext';
 import { playPreview, stopPreview } from '../utils/audioPreview';
 import { showToast } from '../utils/toast';
 
@@ -40,7 +42,9 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   const insets = useSafeAreaInsets();
   const collectionId = Number(params?.collectionId);
   const collectionName = String(params?.collectionName || '歌单');
-  const coverUrl = String(params?.coverUrl || '');
+  /** 当前账号是否会员：非会员只能看到前 FREE_SONG_LIMIT 首 */
+  const { user } = useAuth();
+  const [isVip, setIsVip] = useState(() => Number((user as any)?.vip) === 1);
 
   const [songs, setSongs] = useState<MusicSong[]>([]);
   /** 本地从 Apple Music 加入的歌曲（临时存储，后续接后端接口替换） */
@@ -124,10 +128,34 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
     ? displaySongs.filter((s) => (tab === 'learned' ? s.studyStatus === 2 : s.studyStatus !== 2))
     : displaySongs;
 
+  /**
+   * 会员状态：进页面时校准一次（非会员默认按受限展示，避免先闪出全部歌曲）。
+   * 先清缓存 —— 从会员页买完返回时本页会重新挂载，不能吃到 60s 内的旧结果。
+   */
+  useEffect(() => {
+    let alive = true;
+    clearVipGateCache();
+    void isVipUser((user as any)?.vip).then((vip) => {
+      if (alive) setIsVip(vip);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user]);
+
+  /** 实际展示的歌曲：非会员只给前 FREE_SONG_LIMIT 首，其余锁起来 */
+  const listSongs = isVip ? visibleSongs : visibleSongs.slice(0, FREE_SONG_LIMIT);
+  /** 被会员限制藏起来的数量（> 0 时列表底部出升级提示） */
+  const lockedCount = Math.max(0, visibleSongs.length - listSongs.length);
+  /** 歌单歌曲总数，用于升级提示里的「解锁全部 N 首」 */
+  const totalCount = Math.max(total + localSongs.length, visibleSongs.length);
+
   const hasMore = songs.length > 0 && songs.length < total;
 
   const onEndReached = () => {
     if (loading || loadingMore || !hasMore) return;
+    // 非会员看不到第 5 首之后的，继续翻页没有意义
+    if (lockedCount > 0) return;
     void load(songs.length);
   };
 
@@ -156,7 +184,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
     setPlayingId(null);
     onOpen?.('Player', {
       song,
-      playlist: visibleSongs,
+      // 播放列表与列表展示保持一致：非会员点「下一首」也不会越到锁住的歌
+      playlist: listSongs,
       index,
       collectionName,
     });
@@ -212,13 +241,33 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   };
 
   const playAll = () => {
-    const first = visibleSongs.find((s) => !!s.url);
+    const first = listSongs.find((s) => !!s.url);
     if (first) void togglePlay(first);
   };
 
   const openSearch = () => {
     onOpen?.('SearchSong', { collectionId, collectionName });
   };
+
+  /** 非会员的升级提示：列表底部常驻 */
+  const renderLockFooter = () => (
+    <View style={styles.lockCard}>
+      <View style={styles.lockIconWrap}>
+        <Ionicons name="lock-closed" size={15} color={Colors.goldDeep} />
+      </View>
+      <View style={styles.lockInfo}>
+        <Text style={styles.lockTitle}>免费用户仅显示前 {FREE_SONG_LIMIT} 首</Text>
+        <Text style={styles.lockDesc}>升级 VIP 会员，可显示全部 {totalCount} 首歌曲</Text>
+      </View>
+      <TouchableOpacity
+        style={styles.lockBtn}
+        activeOpacity={0.85}
+        onPress={() => onOpen?.('Purchase')}
+      >
+        <Text style={styles.lockBtnText}>去开通</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   const renderFooter = () => {
     if (loadingMore) {
@@ -228,6 +277,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
         </View>
       );
     }
+    // 有被锁住的歌时，只说清「为什么只剩这几首」，不再显示「已经到底啦」
+    if (lockedCount > 0) return renderLockFooter();
     if (!loading && visibleSongs.length > 0 && !hasMore) {
       return (
         <View style={styles.footer}>
@@ -264,7 +315,7 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
     }
     return (
       <FlatList
-        data={visibleSongs}
+        data={listSongs}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderSong}
         ListFooterComponent={renderFooter}
@@ -296,22 +347,6 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
           {collectionName}
         </Text>
         <View style={styles.topBarRight} />
-      </View>
-
-      <View style={styles.hero}>
-        {coverUrl ? (
-          <Image source={{ uri: coverUrl }} style={styles.heroCover} />
-        ) : (
-          <LinearGradient colors={['#8FB2FF', '#3D5AFE']} style={[styles.heroCover, styles.coverCenter]}>
-            <Ionicons name="musical-notes" size={24} color="rgba(255,255,255,0.9)" />
-          </LinearGradient>
-        )}
-        <View style={styles.heroInfo}>
-          <Text style={styles.heroName} numberOfLines={2}>
-            {collectionName}
-          </Text>
-          <Text style={styles.heroCount}>{total + localSongs.length ? `${total + localSongs.length} 首歌曲` : '歌曲列表'}</Text>
-        </View>
       </View>
 
       {/* 工具条：左侧分区 tab，右侧「添加」与「播放全部」 */}
@@ -359,18 +394,7 @@ const styles = StyleSheet.create({
   },
   topTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: Colors.text, marginLeft: 8 },
   topBarRight: { width: 24 },
-  hero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.card,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-  },
-  heroCover: { width: 72, height: 72, borderRadius: 12 },
   coverCenter: { alignItems: 'center', justifyContent: 'center' },
-  heroInfo: { flex: 1, marginLeft: 14 },
-  heroName: { fontSize: 17, fontWeight: '700', color: Colors.text },
-  heroCount: { fontSize: 12, color: Colors.textMuted, marginTop: 8 },
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -414,6 +438,37 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   playAllText: { fontSize: 13, fontWeight: '600', color: '#fff' },
+  /** 非会员：列表底部的升级提示 */
+  lockCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.goldLight,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F7E3BC',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  lockIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(245,166,35,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockInfo: { flex: 1, marginLeft: 10 },
+  lockTitle: { fontSize: 13, fontWeight: '700', color: Colors.goldDeep },
+  lockDesc: { fontSize: 11.5, color: Colors.textSub, marginTop: 3 },
+  lockBtn: {
+    backgroundColor: Colors.goldDeep,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    marginLeft: 10,
+  },
+  lockBtnText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   list: { flex: 1, marginTop: 12 },
   listBody: { paddingHorizontal: 16, paddingBottom: 24 },
   row: {

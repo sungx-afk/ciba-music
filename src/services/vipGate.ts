@@ -6,6 +6,7 @@ import { fetchBookmarkedWords } from './bookmarkApi';
  *   - 已记住单词达到 20 个
  *   - 生词本单词超过 20 个
  *   - 注册时间超过 3 天（user.createDate）
+ * 另外免费用户在歌单详情页只能看到前 FREE_SONG_LIMIT 首歌。
  *
  * 会员状态与生词本数量都做短时缓存，避免每次点击都发请求；
  * 加入生词本、支付成功等会改变结果的场景调用 clearVipGateCache() 失效缓存。
@@ -14,6 +15,8 @@ import { fetchBookmarkedWords } from './bookmarkApi';
 export const FREE_MASTERED_LIMIT = 20;
 export const FREE_BOOKMARK_LIMIT = 20;
 export const FREE_TRIAL_DAYS = 3;
+/** 免费用户在歌单详情页能看到的歌曲数量 */
+export const FREE_SONG_LIMIT = 4;
 
 export type VipBlockReason = 'mastered' | 'bookmark' | 'trial';
 
@@ -57,6 +60,21 @@ async function loadGateCache(): Promise<GateCache> {
   }
   cache = { at: now, isVip, bookmarkTotal: null };
   return cache;
+}
+
+/**
+ * 只问「当前用户是不是会员」，不做任何额度判断。
+ * 歌单详情页这类「按会员身份决定展示多少」的场景用它。
+ * 走的是同一份 60s 缓存，user.vip === 1 时直接返回，省掉一次请求。
+ */
+export async function isVipUser(userVip?: number | string | null): Promise<boolean> {
+  if (Number(userVip) === 1) return true;
+  try {
+    const state = await loadGateCache();
+    return state.isVip;
+  } catch {
+    return false;
+  }
 }
 
 export async function checkVipGate(params: {
