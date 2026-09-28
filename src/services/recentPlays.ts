@@ -4,9 +4,9 @@ import { MusicSong } from './musicApi';
 /**
  * 「最近播放」本机记录（最多 20 条，按最近播放时间倒序）。
  *
- * 为什么不直接复用歌单接口：
- * 首页只需要「封面 / 歌名 / 歌手 / 时长」和「能重新播这首歌」的最小字段，
- * lyric / bilingualLyric 这类几十 KB 的大字段不入库，避免把 AsyncStorage 撑爆。
+ * 记录里会带上 lyric / bilingualLyric：从「最近播放」直接重听时，
+ * 重建出的歌曲要能正常显示并跟随高亮歌词，否则就和「从歌单里点开」体验不一致。
+ * 上限 20 条、单条歌词几十 KB，整体仍在 AsyncStorage 安全范围内。
  *
  * key 与学习进度一致按账号隔离：登录后带 #userId，未登录用游客公共 key。
  */
@@ -27,6 +27,10 @@ export interface RecentPlayItem {
   previewStartSec?: number;
   /** 语法 / 词汇重点 */
   description: string;
+  /** 原始 LRC 歌词（重听时带回去，避免「最近播放」没歌词） */
+  lyric: string;
+  /** 结构化双语歌词（带 seconds，播放页优先用它做对齐高亮） */
+  bilingualLyric: string;
   /** 最近一次播放的时间戳（ms） */
   playedAt: number;
 }
@@ -57,8 +61,8 @@ export function toMusicSong(item: RecentPlayItem): MusicSong {
     sortOrder: 0,
     previewStartSec: item.previewStartSec,
     appleId: item.appleId,
-    lyric: '',
-    bilingualLyric: '',
+    lyric: item.lyric,
+    bilingualLyric: item.bilingualLyric,
   };
 }
 
@@ -82,6 +86,8 @@ function normalize(raw: any): RecentPlayItem[] {
             ? undefined
             : Number(x.previewStartSec),
         description: String(x.description ?? ''),
+        lyric: String(x.lyric ?? ''),
+        bilingualLyric: String(x.bilingualLyric ?? ''),
         playedAt: Number(x.playedAt) || 0,
       }),
     );
@@ -113,6 +119,8 @@ export async function recordRecentPlay(accountId: string, song: MusicSong): Prom
       appleId: song.appleId,
       previewStartSec: song.previewStartSec,
       description: song.description,
+      lyric: song.lyric ?? '',
+      bilingualLyric: song.bilingualLyric ?? '',
       playedAt: Date.now(),
     };
     const next = [item, ...list.filter((x) => x.id !== item.id)].slice(0, MAX_ITEMS);
