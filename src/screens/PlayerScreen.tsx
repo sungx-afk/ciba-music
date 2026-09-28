@@ -31,7 +31,7 @@ import { WordLookupCard } from '../components/WordLookupCard';
 
 const TABS = ['歌词', '翻译', '词汇'];
 
-/** 歌词行高估算值，用于把当前行滚到可视区 */
+/** 歌词行最小高度（仅是视觉用；滚动定位已改成 onLayout 实测，不再拿它算位置） */
 const LYRIC_LINE_HEIGHT = 62;
 
 type OpenFn = (name: string, params?: Record<string, any>) => void;
@@ -95,6 +95,10 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   const [lookupWord, setLookupWord] = useState<string | null>(null);
 
   const lyricRef = useRef<ScrollView | null>(null);
+  /** 每行歌词在滚动内容里的真实 y（onLayout 量出来的），切歌 / 切 tab 会清空重建 */
+  const lyricOffsets = useRef<number[]>([]);
+  /** 歌词可视区高度，用来决定当前行停在偏上多少（不再写死 72px） */
+  const lyricViewportH = useRef(0);
   /** 播完自动切歌时读的是最新状态，避免闭包里拿到旧值 */
   const infoRef = useRef({ index: 0, total: 0, shuffle: false, repeat: false });
   /** 用来识别「新的一次播完」 */
@@ -221,14 +225,39 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     handleFinish();
   }, [player.finishedCount, handleFinish]);
 
+  /**
+   * 把第 line 行滚到可视区。
+   * 位置一律用 onLayout 量出来的真实 y：写死行高会越滚越偏 ——
+   * 「歌词」tab 一行约 53px，而「翻译」tab 只有 32px，估成 62 滚到中后段就会把当前行推上去看不见。
+   */
+  const scrollToLine = useCallback((line: number, animated: boolean) => {
+    // 还没量到这一行就先不动，等它的 onLayout 回来自己纠一次
+    const y = lyricOffsets.current[line];
+    if (typeof y !== 'number') return;
+    // 当前行停在可视区偏上（约 1/4 处），下方留出接下来的几句
+    const anchor = lyricViewportH.current > 0 ? lyricViewportH.current * 0.25 : 72;
+    lyricRef.current?.scrollTo({ y: Math.max(0, y - anchor), animated });
+  }, []);
+
+  /** 切 tab：两个 tab 的行高不一样，之前量出来的行位置作废，重新量 */
+  useEffect(() => {
+    lyricOffsets.current = [];
+  }, [tab]);
+
   /** 歌词跟着播放进度滚 */
   useEffect(() => {
-    if (activeLine < 0) return;
-    lyricRef.current?.scrollTo({
-      y: Math.max(0, activeLine * LYRIC_LINE_HEIGHT - 72),
-      animated: true,
-    });
-  }, [activeLine, tab]);
+    scrollToLine(activeLine, true);
+  }, [activeLine, tab, scrollToLine]);
+
+  /**
+   * 切歌：歌词拉回顶部。
+   * 新歌前奏里第一句还没到（activeLine 一直是 -1），光靠「跟着 activeLine 滚」触发不了，
+   * 上一首停住的位置就会一直留着，看起来像没回到上方。
+   */
+  useEffect(() => {
+    lyricOffsets.current = [];
+    lyricRef.current?.scrollTo({ y: 0, animated: false });
+  }, [current?.id]);
 
   const togglePlay = async () => {
     // 示例模式没有音频，只切一下按钮状态
@@ -343,6 +372,11 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
           contentContainerStyle={styles.lyricBody}
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
+          onLayout={(e) => {
+            lyricViewportH.current = e.nativeEvent.layout.height;
+            // 视口高度量到后锚点才算得准，把当前行按新锚点再摆一次
+            scrollToLine(activeLine, false);
+          }}
         >
           {lines.map((l, i) => {
           const on = i === activeLine;
@@ -351,13 +385,28 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
           const dimmed = outOfRange ? styles.dimmed : null;
           if (zhOnly) {
             return (
-              <TouchableOpacity key={`${l.seconds}-${i}`} onPress={() => seek(l.seconds * 1000)}>
+              <TouchableOpacity
+                key={`${l.seconds}-${i}`}
+                onPress={() => seek(l.seconds * 1000)}
+                onLayout={(e) => {
+                  lyricOffsets.current[i] = e.nativeEvent.layout.y;
+                  // 量到的正好是当前行就精确纠一次位（首次挂载时 activeLine 效应可能早于布局）
+                  if (i === activeLine) scrollToLine(i, false);
+                }}
+              >
                 <Text style={[styles.zhOnly, dimmed, on && styles.zhOnlyOn]}>{l.zh || l.en}</Text>
               </TouchableOpacity>
             );
           }
           return (
-            <View key={`${l.seconds}-${i}`} style={styles.lyricItem}>
+            <View
+              key={`${l.seconds}-${i}`}
+              style={styles.lyricItem}
+              onLayout={(e) => {
+                lyricOffsets.current[i] = e.nativeEvent.layout.y;
+                if (i === activeLine) scrollToLine(i, false);
+              }}
+            >
               <View style={styles.lyricHead}>
                 {on ? <Ionicons name="stats-chart" size={13} color={S.gold} /> : null}
                 {/* 单词可点查词。整行不再是点按容器，避免父级和单词抢手势
