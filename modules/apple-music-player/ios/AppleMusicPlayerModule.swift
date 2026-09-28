@@ -132,7 +132,7 @@ public final class AppleMusicPlayerModule: Module {
             promise.reject("not_authorized", "需要授权访问 Apple Music 才能搜索")
             return
           }
-          let request = MusicCatalogSearchRequest(types: [Song.self], term: term)
+          let request = MusicCatalogSearchRequest(term: term, types: [Song.self])
           let response = try await request.response()
           let songs = response.songs.prefix(max(1, limit))
           let items: [[String: Any]] = songs.map { song in
