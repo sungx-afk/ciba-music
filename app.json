@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CibaMusic",
+    "name": "糍粑听歌学英语",
     "slug": "ciba-music",
     "version": "1.0.0",
     "scheme": "cibamusic",
@@ -17,7 +17,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.yugusoft.CibaEnglish.music",
       "infoPlist": {
-        "CFBundleDisplayName": "CibaMusic",
+        "CFBundleDisplayName": "糍粑听歌学英语",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppleMusicUsageDescription": "用于读取你的 Apple Music 订阅状态，以便播放完整歌曲与歌词跟读。",
         "UIBackgroundModes": ["audio"],

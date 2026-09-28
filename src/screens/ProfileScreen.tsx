@@ -501,7 +501,7 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
         </View>
 
         <View style={styles.aboutFooter}>
-          <Text style={styles.aboutText}>糍粑音乐 · CibaMusic v{APP_VERSION}</Text>
+          <Text style={styles.aboutText}>糍粑听歌学英语 v{APP_VERSION}</Text>
           <Text style={styles.aboutSub}>听歌学英语，边听边记单词</Text>
         </View>
       </ScrollView>
