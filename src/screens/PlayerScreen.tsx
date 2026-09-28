@@ -351,21 +351,28 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
             );
           }
           return (
-            <TouchableOpacity
-              key={`${l.seconds}-${i}`}
-              style={styles.lyricItem}
-              onPress={() => seek(l.seconds * 1000)}
-              activeOpacity={0.75}
-            >
+            <View key={`${l.seconds}-${i}`} style={styles.lyricItem}>
               <View style={styles.lyricHead}>
                 {on ? <Ionicons name="stats-chart" size={13} color={S.gold} /> : null}
-                <Text style={[styles.lyricEn, dimmed, on && styles.lyricEnOn]}>{l.en}</Text>
-                <Text style={styles.lyricTime}>{l.time}</Text>
+                {/* 单词可点查词。整行不再是点按容器，避免父级和单词抢手势
+                    （之前点单词会被整行的 seek 吃掉，还弹「片段对不上歌词」的提示） */}
+                <Text style={[styles.lyricEn, dimmed, on && styles.lyricEnOn]}>
+                  {renderWordSpans(l.en)}
+                </Text>
+                {/* 跳转播放进度改到这里：点时间戳，和单词点击互不干扰 */}
+                <TouchableOpacity
+                  style={styles.lyricTimeBtn}
+                  onPress={() => seek(l.seconds * 1000)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.lyricTime}>{l.time}</Text>
+                </TouchableOpacity>
               </View>
               {l.zh ? (
                 <Text style={[styles.lyricZh, dimmed, on && styles.lyricZhOn]}>{l.zh}</Text>
               ) : null}
-            </TouchableOpacity>
+            </View>
           );
           })}
         </ScrollView>
@@ -726,6 +733,8 @@ const styles = StyleSheet.create({
   lyricEn: { flex: 1, fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.86)' },
   lyricEnOn: { fontSize: 15.5, fontWeight: '700', color: '#fff' },
   lyricTime: { fontSize: 10, color: S.gold },
+  /** 时间戳变成跳转入口，加大点按区域 */
+  lyricTimeBtn: { marginLeft: 8, paddingHorizontal: 4, paddingVertical: 4 },
   lyricZh: { fontSize: 12, color: S.muted, marginTop: 4 },
   lyricZhOn: { color: 'rgba(255,255,255,0.66)', marginLeft: 20 },
   zhOnly: { fontSize: 13, lineHeight: 20, color: 'rgba(255,255,255,0.8)', marginBottom: 12 },
