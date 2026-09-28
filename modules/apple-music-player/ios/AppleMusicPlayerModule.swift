@@ -146,7 +146,7 @@ public final class AppleMusicPlayerModule: Module {
               dict["artworkUrl"] = artwork.url(width: 300, height: 300)?.absoluteString ?? ""
             }
             if let preview = song.previewAssets?.first {
-              dict["previewUrl"] = preview.url.absoluteString
+              dict["previewUrl"] = preview.url?.absoluteString ?? ""
             }
             return dict
           }
