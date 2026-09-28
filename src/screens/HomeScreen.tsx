@@ -14,10 +14,38 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { homeBanner } from '../data/mock';
-import { MusicApi, MusicCollection } from '../services/musicApi';
+import { MusicApi, MusicCollection, formatDuration } from '../services/musicApi';
+import { RecentPlayItem, toMusicSong } from '../services/recentPlays';
+import { useRecentPlays } from '../hooks/useRecentPlays';
 import { AppleMusicPrompt } from '../components/AppleMusicPrompt';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 type OpenFn = (name: string, params?: Record<string, any>) => void;
+
+/**
+ * 没封面时的兜底渐变：按歌名哈希稳定挑一组，保证同一首歌每次颜色一致。
+ * 色值取自主题里的蓝 / 青 / 紫 / 金 / 薄荷 / 灰蓝，整体和 App 配色统一。
+ */
+const COVER_GRADIENTS: [string, string][] = [
+  ['#6D8BFF', '#2A5FE0'],
+  ['#5AC8E8', '#1C7EA8'],
+  ['#8F7FFF', '#5B45E0'],
+  ['#F7C65C', '#D9860B'],
+  ['#7BE0BE', '#12A183'],
+  ['#A9B6CC', '#5A6B85'],
+];
+
+function coverGradient(seed: string): [string, string] {
+  let sum = 0;
+  for (let i = 0; i < seed.length; i += 1) sum += seed.charCodeAt(i);
+  return COVER_GRADIENTS[sum % COVER_GRADIENTS.length];
+}
+
+/** 兜底封面上的首字母 */
+function coverLetter(title: string): string {
+  const t = (title || '').trim();
+  return t ? t.charAt(0).toUpperCase() : '♪';
+}
 
 export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
   /** 真机状态栏会压住问候语，顶部留出安全区（底部由 TabBar 负责） */
@@ -26,6 +54,9 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  /** 最近播放：自己订阅变更，播放页写入后这里自动刷新 */
+  const recent = useRecentPlays();
+  const [showClearRecent, setShowClearRecent] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (silent) {
@@ -56,6 +87,12 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
       coverUrl: item.coverUrl,
       songCount: item.songCount,
     });
+  };
+
+  /** 从最近播放直接回到播放页：记录里已带 url / appleId，可以直接起播 */
+  const openRecent = (item: RecentPlayItem) => {
+    const song = toMusicSong(item);
+    onOpen('Player', { song, playlist: [song] });
   };
 
   return (
@@ -98,6 +135,58 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
             <Ionicons name="play" size={16} color="#fff" />
           </TouchableOpacity>
         </LinearGradient>
+
+        {/* 最近播放：只有播过歌才出现，不占没用过的用户的版面 */}
+        {recent.items.length > 0 ? (
+          <View>
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>最近播放</Text>
+              <TouchableOpacity
+                onPress={() => setShowClearRecent(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.sectionAction}>清空</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.recentScroll}
+              contentContainerStyle={styles.recentRow}
+            >
+              {recent.items.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.recentCard}
+                  activeOpacity={0.85}
+                  onPress={() => openRecent(item)}
+                >
+                  {item.coverUrl ? (
+                    <Image source={{ uri: item.coverUrl }} style={styles.recentCover} />
+                  ) : (
+                    <LinearGradient
+                      colors={coverGradient(item.title)}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[styles.recentCover, styles.recentCoverFallback]}
+                    >
+                      <Text style={styles.recentCoverLetter}>{coverLetter(item.title)}</Text>
+                    </LinearGradient>
+                  )}
+                  <Text style={styles.recentTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.recentArtist} numberOfLines={1}>
+                    {item.artist}
+                  </Text>
+                  <View style={styles.recentBadge}>
+                    <Text style={styles.recentBadgeText}>{formatDuration(item.duration)}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
         <View style={styles.sectionHead}>
           <Text style={styles.sectionTitle}>精选歌单</Text>
@@ -167,6 +256,17 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
             ))
           : null}
       </ScrollView>
+
+      <ConfirmDialog
+        visible={showClearRecent}
+        title="清空最近播放"
+        message="清空后首页将不再显示最近播放的歌曲，不影响学习记录和歌单。"
+        confirmText="清空"
+        onClose={() => setShowClearRecent(false)}
+        onConfirm={() => {
+          void recent.clear();
+        }}
+      />
     </View>
   );
 };
@@ -236,6 +336,28 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
   sectionCount: { fontSize: 12, color: Colors.textMuted },
+  sectionAction: { fontSize: 12, color: Colors.textMuted },
+  /**
+   * 横滑区做成「通栏」：父级 body 有 16 的左右 padding，
+   * 这里用负 margin 抵消，让卡片能贴着屏幕边缘滑出；内容再用 paddingHorizontal 对齐回来。
+   */
+  recentScroll: { marginHorizontal: -16 },
+  recentRow: { paddingHorizontal: 16, gap: 12, paddingBottom: 2 },
+  recentCard: { width: 104 },
+  recentCover: { width: 104, height: 104, borderRadius: 14, backgroundColor: Colors.surfaceSoft },
+  recentCoverFallback: { alignItems: 'center', justifyContent: 'center' },
+  recentCoverLetter: { fontSize: 38, fontWeight: '800', color: 'rgba(255,255,255,0.95)' },
+  recentTitle: { fontSize: 13, fontWeight: '700', color: Colors.text, marginTop: 8 },
+  recentArtist: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  recentBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.blueLight,
+    borderRadius: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginTop: 6,
+  },
+  recentBadgeText: { fontSize: 10, fontWeight: '700', color: Colors.blueDeep },
   stateBox: {
     backgroundColor: Colors.card,
     borderRadius: 14,

@@ -24,6 +24,8 @@ import { musicPlayer } from '../services/player/musicPlayer';
 import { useMusicPlayer } from '../hooks/useMusicPlayer';
 import { useAppleMusicSubscription } from '../hooks/useAppleMusicSubscription';
 import { openAppleMusicSubscribe } from '../services/appleMusic';
+import { accountIdOf, recordRecentPlay } from '../services/recentPlays';
+import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
 import { WordLookupCard } from '../components/WordLookupCard';
 
@@ -80,6 +82,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   /** 播放状态统一从 musicPlayer 来，页面不再自己引 expo-av / MusicKit */
   const player = useMusicPlayer();
   const subscription = useAppleMusicSubscription();
+  /** 最近播放按账号分区，读取当前登录用户 id */
+  const { user } = useAuth();
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
   const [liked, setLiked] = useState(false);
@@ -198,6 +202,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
       },
       { autoPlay: true },
     );
+    /** 记一笔「最近播放」，供首页展示；写失败不影响播放 */
+    void recordRecentPlay(accountIdOf(user), current);
   }, [current?.id, current?.url, isDemo]);
 
   /** 离开播放页释放音频 */

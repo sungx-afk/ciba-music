@@ -25,11 +25,13 @@ export async function clearLocalAccountData(
     id ? `@ciba_progress_v1#${id}` : '@ciba_progress_v1',
     id ? `@ciba_current_pack#${id}` : '@ciba_current_pack',
     id ? `@ciba_selected_top_pack#${id}` : '@ciba_selected_top_pack',
+    id ? `@ciba_recent_plays_v1#${id}` : '@ciba_recent_plays_v1',
   ];
   const legacyKeys = [
     '@ciba_progress_v1',
     '@ciba_current_pack',
     '@ciba_selected_top_pack',
+    '@ciba_recent_plays_v1',
   ];
 
   const allKeys = await AsyncStorage.getAllKeys();
