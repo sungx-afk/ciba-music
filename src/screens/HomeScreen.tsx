@@ -161,9 +161,6 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
             </Text>
             <Text style={styles.subGreeting}>让好听的歌，成为你的英语课堂</Text>
           </View>
-          <TouchableOpacity style={styles.bellBtn}>
-            <Ionicons name="notifications-outline" size={18} color={Colors.text} />
-          </TouchableOpacity>
         </View>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={16} color={Colors.textMuted} />
@@ -349,14 +346,6 @@ const styles = StyleSheet.create({
   greetText: { flex: 1 },
   greeting: { fontSize: 22, fontWeight: '700', color: Colors.text },
   subGreeting: { fontSize: 12, color: Colors.textMuted, marginTop: 4 },
-  bellBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: Colors.surfaceSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
