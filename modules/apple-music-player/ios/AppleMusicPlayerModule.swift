@@ -113,6 +113,49 @@ public final class AppleMusicPlayerModule: Module {
       }
     }
 
+    /**
+     * 在 Apple Music 目录里按关键词搜索歌曲（方案：搜索接入）。
+     * 复用 App 已开启的 MusicKit Automatic Developer Token，无需自建 JWT。
+     * 前提：用户已授权 MusicKit（canPlayCatalogContent 不一定是 true，catalog 搜索只要 .authorized）。
+     */
+    AsyncFunction("search") { (term: String, limit: Int, promise: Promise) in
+      guard #available(iOS 15.0, *) else {
+        promise.reject("unsupported", "Apple Music 搜索需要 iOS 15+")
+        return
+      }
+      Task { @MainActor in
+        do {
+          // catalog 搜索依赖用户授权（订阅模块已触发过，这里兜底再确认一次）
+          let authorization = await MusicAuthorization.request()
+          guard authorization.status == .authorized else {
+            promise.reject("not_authorized", "需要授权访问 Apple Music 才能搜索")
+            return
+          }
+          let request = MusicCatalogSearchRequest(types: [Song.self], term: term)
+          let response = try await request.response()
+          let songs = response.songs.prefix(max(1, limit))
+          let items: [[String: Any]] = songs.map { song in
+            var dict: [String: Any] = [:]
+            dict["id"] = song.id.rawValue
+            dict["title"] = song.title
+            dict["artist"] = song.artistName
+            dict["album"] = song.albumTitle ?? ""
+            dict["duration"] = song.duration ?? 0
+            if let artwork = song.artwork {
+              dict["artworkUrl"] = artwork.url(width: 300, height: 300)?.absoluteString ?? ""
+            }
+            if let preview = song.previewAssets?.first {
+              dict["previewUrl"] = preview.url.absoluteString
+            }
+            return dict
+          }
+          promise.resolve(items)
+        } catch {
+          promise.reject("search_failed", error.localizedDescription)
+        }
+      }
+    }
+
     OnDestroy {
       self.stopPolling()
     }

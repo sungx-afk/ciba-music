@@ -87,6 +87,31 @@ export async function stop(): Promise<void> {
   await mod.stop();
 }
 
+/** 一首来自 Apple Music 目录的搜索结果 */
+export interface AppleMusicSong {
+  /** Apple Music catalog id，全曲播放 / 落库用 */
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  /** 时长（秒） */
+  duration: number;
+  /** 封面图地址 */
+  artworkUrl?: string;
+  /** 试听片段地址（30s~60s） */
+  previewUrl?: string;
+}
+
+/**
+ * 在 Apple Music 目录里按关键词搜索歌曲。
+ * 需要 iOS 真机 + 用户已授权 MusicKit（模拟器 / Expo Go 下原生模块不可用，会抛错）。
+ */
+export async function searchSongs(term: string, limit = 30): Promise<AppleMusicSong[]> {
+  const mod = nativeModule();
+  if (!mod?.search) throw new Error('AppleMusicPlayer 原生模块不可用');
+  return mod.search(String(term), limit);
+}
+
 /** 订阅播放状态事件（status / position / duration / finished） */
 export function addPlaybackListener(listener: (event: PlaybackStatusEvent) => void): PlaybackListenerHandle {
   return getEmitter().addListener('onPlaybackStatus', listener);
