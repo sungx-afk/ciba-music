@@ -16,7 +16,6 @@ import { nowPlaying, playingLyrics } from '../data/mock';
 import {
   LyricLine,
   MusicSong,
-  formatDuration,
   formatMillis,
   parseLyricLines,
 } from '../services/musicApi';
@@ -29,7 +28,7 @@ import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
 import { WordLookupCard } from '../components/WordLookupCard';
 
-const TABS = ['歌词', '翻译', '词汇'];
+const TABS = ['歌词', '翻译', '学习要点'];
 
 /** 歌词行最小高度（仅是视觉用；滚动定位已改成 onLayout 实测，不再拿它算位置） */
 const LYRIC_LINE_HEIGHT = 62;
@@ -140,9 +139,7 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
 
   const title = isDemo ? nowPlaying.title : current!.title;
   const artist = isDemo ? nowPlaying.artist : current!.artist;
-  const album = isDemo ? nowPlaying.album : current!.album;
   const coverUrl = isDemo ? '' : current!.coverUrl;
-  const point = isDemo ? nowPlaying.desc : current!.description;
 
   const lines = useMemo(() => (isDemo ? DEMO_LINES : parseLyricLines(current)), [isDemo, current]);
 
@@ -314,14 +311,6 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   /** 只有在「对齐得了 + 片段明显短于整首歌」时才画可听区间 */
   const showWindow = aligned && isPreview && audioDuration > 0 && windowEnd < songDuration - 1000;
 
-  const openLearn = () => {
-    if (isDemo || !current) {
-      showToast('先从歌单里选一首歌吧', 'info');
-      return;
-    }
-    onOpen?.('Lyrics', { song: current, collectionName });
-  };
-
   /**
    * 把一行歌词拆成可点的单词：含字母的词加 onPress 查词，空格/标点原样输出。
    * 点击只查词、不冒泡到整行的「点歌词跳转」，避免查词时顺带跳转播放进度。
@@ -438,23 +427,11 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   const renderPanel = () => {
     if (tab === '歌词') return renderLyricLines(false);
     if (tab === '翻译') return renderLyricLines(true);
-    if (tab === '学习') {
-      return (
-        <View style={styles.learnPanel}>
-          <TouchableOpacity style={styles.learnCta} onPress={openLearn} activeOpacity={0.85}>
-            <Ionicons name="sparkles" size={16} color="#fff" />
-            <Text style={styles.learnCtaText}>开始逐句学习这首歌</Text>
-          </TouchableOpacity>
-          <Text style={styles.learnHint}>
-            逐句精学会拆开每一句：单词释义、跟读打分、中英对照，学完自动标记进度
-          </Text>
-        </View>
-      );
-    }
+    // 学习要点：内容后续对接，先占位
     return (
       <View style={styles.emptyPanel}>
-        <Ionicons name="library-outline" size={24} color={S.muted} />
-        <Text style={styles.emptyText}>本歌的词汇数据待接口接入</Text>
+        <Ionicons name="school-outline" size={24} color={S.muted} />
+        <Text style={styles.emptyText}>本歌的学习要点数据待接口接入</Text>
       </View>
     );
   };
@@ -489,133 +466,26 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
         </View>
       </View>
 
-      {/* 歌曲信息（固定，不随歌词滚动） */}
+      {/* 歌曲信息（简化：缩小封面，只留歌名 + 作者） */}
       <View style={styles.headRow}>
         {coverUrl ? (
           <Image source={{ uri: coverUrl }} style={styles.cover} />
         ) : (
-          <LinearGradient colors={nowPlaying.cover} style={styles.cover}>
-            <Text style={styles.coverTop}>{isDemo ? nowPlaying.coverTop : artist.slice(0, 12)}</Text>
-            <View style={styles.sunWrap}>
-              <LinearGradient colors={['#FFF3C4', '#F0A81E', '#D9770F']} style={styles.sun} />
-            </View>
-            <Text style={styles.coverBottom}>{isDemo ? nowPlaying.coverBottom : title.slice(0, 12)}</Text>
-          </LinearGradient>
+          <View style={styles.coverFallback}>
+            <Ionicons name="musical-notes" size={22} color="rgba(255,255,255,0.82)" />
+          </View>
         )}
         <View style={styles.headInfo}>
-          <Text style={styles.songTitle} numberOfLines={2}>
+          <Text style={styles.songTitle} numberOfLines={1}>
             {title}
           </Text>
           <Text style={styles.songArtist} numberOfLines={1}>
             {artist}
           </Text>
-          <Text style={styles.songAlbum} numberOfLines={1}>
-            {album}
-          </Text>
-          <View style={styles.tagRow}>
-            {point ? (
-              <View style={styles.levelTag}>
-                <Text style={styles.levelText}>{point}</Text>
-              </View>
-            ) : null}
-            <View style={styles.genreTag}>
-              <Text style={styles.genreText}>
-                {isDemo ? nowPlaying.duration : formatDuration(current!.duration)}
-              </Text>
-            </View>
-            {playlist.length > 1 ? (
-              <View style={styles.genreTag}>
-                <Text style={styles.genreText}>
-                  {index + 1}/{playlist.length}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          {collectionName ? (
-            <Text style={styles.desc} numberOfLines={1}>
-              来自歌单 · {collectionName}
-            </Text>
-          ) : null}
         </View>
       </View>
 
-      {/* 进度条：点一下跳到对应位置 */}
-      <View style={styles.progressWrap}>
-        <TouchableOpacity
-          style={styles.track}
-          onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-          onPress={onTrackPress}
-          activeOpacity={1}
-        >
-          {/* 可听区间：试听时只有这一段有声音 */}
-          {showWindow ? (
-            <View
-              style={[
-                styles.window,
-                { left: `${windowLeft * 100}%`, width: `${windowWidth * 100}%` },
-              ]}
-            />
-          ) : null}
-          <View style={[styles.fill, { width: `${progress * 100}%` }]} />
-          <View style={[styles.knob, { left: `${progress * 100}%` }]} />
-        </TouchableOpacity>
-        <View style={styles.timeRow}>
-          <Text style={styles.time}>{formatMillis(timelinePosition)}</Text>
-          {isPreview ? (
-            <Text style={styles.previewHint}>
-              {showWindow
-                ? `试听 ${formatMillis(audioDuration)} / 全曲 ${formatMillis(songDuration)}`
-                : `试听片段 · 全曲 ${formatMillis(songDuration)}`}
-            </Text>
-          ) : null}
-          <Text style={styles.time}>{formatMillis(timelineDuration)}</Text>
-        </View>
-      </View>
-
-      {/* 播放控制 */}
-      <View style={styles.controls}>
-        <TouchableOpacity onPress={() => setShuffle(!shuffle)}>
-          <Ionicons name="shuffle" size={19} color={shuffle ? S.gold : S.textSub} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => goTo(index - 1)} disabled={!playlist.length}>
-          <Ionicons
-            name="play-skip-back"
-            size={24}
-            color={playlist.length ? '#fff' : 'rgba(255,255,255,0.3)'}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.playBtn} onPress={togglePlay}>
-          {loadingAudio ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Ionicons name={playing ? 'pause' : 'play'} size={26} color="#fff" />
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => goTo(index + 1)} disabled={!playlist.length}>
-          <Ionicons
-            name="play-skip-forward"
-            size={24}
-            color={playlist.length ? '#fff' : 'rgba(255,255,255,0.3)'}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setRepeat(!repeat)}>
-          <Ionicons name="repeat" size={19} color={repeat ? S.gold : S.textSub} />
-        </TouchableOpacity>
-      </View>
-      {audioError ? <Text style={styles.audioError}>{audioError}</Text> : null}
-
-      {/* 未订阅 Apple Music 时：说明现在播的是试听片段，给个去订阅入口 */}
-      {!isDemo && subscription.status === 'eligible' && player.source === 'preview' ? (
-        <TouchableOpacity style={styles.previewBar} onPress={onSubscribe} activeOpacity={0.85}>
-          <Ionicons name="musical-notes-outline" size={14} color={S.gold} />
-          <Text style={styles.previewText} numberOfLines={1}>
-            试听片段 · 订阅 Apple Music 听完整版
-          </Text>
-          <Text style={styles.previewCta}>去订阅</Text>
-        </TouchableOpacity>
-      ) : null}
-
-      {/* 分区 */}
+      {/* 分区：歌词 / 翻译 / 学习要点 */}
       <View style={styles.segment}>
         {TABS.map((t) => (
           <TouchableOpacity
@@ -628,8 +498,87 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
         ))}
       </View>
 
-      {/* 只有这一块滚动：歌词 / 翻译 / 学习 / 词汇 */}
+      {/* 中间：只有这一块滚动（歌词 / 翻译 / 学习要点） */}
       <View style={styles.panel}>{renderPanel()}</View>
+
+      {/* 底部：进度 + 播放控制（整体移到底部） */}
+      <View style={styles.bottom}>
+        {audioError ? <Text style={styles.audioError}>{audioError}</Text> : null}
+        {/* 未订阅 Apple Music 时：说明现在播的是试听片段，给个去订阅入口 */}
+        {!isDemo && subscription.status === 'eligible' && player.source === 'preview' ? (
+          <TouchableOpacity style={styles.previewBar} onPress={onSubscribe} activeOpacity={0.85}>
+            <Ionicons name="musical-notes-outline" size={14} color={S.gold} />
+            <Text style={styles.previewText} numberOfLines={1}>
+              试听片段 · 订阅 Apple Music 听完整版
+            </Text>
+            <Text style={styles.previewCta}>去订阅</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* 进度条：点一下跳到对应位置 */}
+        <View style={styles.progressWrap}>
+          <TouchableOpacity
+            style={styles.track}
+            onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
+            onPress={onTrackPress}
+            activeOpacity={1}
+          >
+            {/* 可听区间：试听时只有这一段有声音 */}
+            {showWindow ? (
+              <View
+                style={[
+                  styles.window,
+                  { left: `${windowLeft * 100}%`, width: `${windowWidth * 100}%` },
+                ]}
+              />
+            ) : null}
+            <View style={[styles.fill, { width: `${progress * 100}%` }]} />
+            <View style={[styles.knob, { left: `${progress * 100}%` }]} />
+          </TouchableOpacity>
+          <View style={styles.timeRow}>
+            <Text style={styles.time}>{formatMillis(timelinePosition)}</Text>
+            {isPreview ? (
+              <Text style={styles.previewHint}>
+                {showWindow
+                  ? `试听 ${formatMillis(audioDuration)} / 全曲 ${formatMillis(songDuration)}`
+                  : `试听片段 · 全曲 ${formatMillis(songDuration)}`}
+              </Text>
+            ) : null}
+            <Text style={styles.time}>{formatMillis(timelineDuration)}</Text>
+          </View>
+        </View>
+
+        {/* 播放控制：上一曲 / 播放暂停 / 下一曲 + 随机 / 循环 */}
+        <View style={styles.controls}>
+          <TouchableOpacity onPress={() => setShuffle(!shuffle)}>
+            <Ionicons name="shuffle" size={19} color={shuffle ? S.gold : S.textSub} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => goTo(index - 1)} disabled={!playlist.length}>
+            <Ionicons
+              name="play-skip-back"
+              size={24}
+              color={playlist.length ? '#fff' : 'rgba(255,255,255,0.3)'}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.playBtn} onPress={togglePlay}>
+            {loadingAudio ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Ionicons name={playing ? 'pause' : 'play'} size={26} color="#fff" />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => goTo(index + 1)} disabled={!playlist.length}>
+            <Ionicons
+              name="play-skip-forward"
+              size={24}
+              color={playlist.length ? '#fff' : 'rgba(255,255,255,0.3)'}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setRepeat(!repeat)}>
+            <Ionicons name="repeat" size={19} color={repeat ? S.gold : S.textSub} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       {/* 点歌词中的单词 -> 查词卡片 */}
       <WordLookupCard wordName={lookupWord} onClose={() => setLookupWord(null)} />
@@ -657,15 +606,20 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 18 },
-  headRow: { flexDirection: 'row', paddingHorizontal: 18, marginTop: 12 },
+  headRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, marginTop: 16 },
   cover: {
-    width: 128,
-    height: 128,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    width: 56,
+    height: 56,
+    borderRadius: 8,
     overflow: 'hidden',
+  },
+  coverFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   coverTop: { fontSize: 8, letterSpacing: 2, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
   sunWrap: {
@@ -678,9 +632,9 @@ const styles = StyleSheet.create({
   },
   sun: { width: 74, height: 74, borderRadius: 37 },
   coverBottom: { fontSize: 8, letterSpacing: 2, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
-  headInfo: { flex: 1, marginLeft: 14 },
-  songTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
-  songArtist: { fontSize: 13, color: S.textSub, marginTop: 3 },
+  headInfo: { flex: 1, marginLeft: 12 },
+  songTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  songArtist: { fontSize: 12, color: S.textSub, marginTop: 4 },
   songAlbum: { fontSize: 11, color: S.muted, marginTop: 4 },
   tagRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   levelTag: { backgroundColor: S.accent, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
@@ -694,7 +648,9 @@ const styles = StyleSheet.create({
   },
   genreText: { fontSize: 10, color: S.textSub },
   desc: { fontSize: 11, lineHeight: 16, color: S.muted, marginTop: 10 },
-  progressWrap: { marginTop: 16, paddingHorizontal: 18 },
+  /** 底部固定区：进度 + 播放控制，整体贴底 */
+  bottom: { paddingTop: 6, paddingBottom: 12, paddingHorizontal: 18 },
+  progressWrap: { marginTop: 6 },
   track: { height: 14, justifyContent: 'center' },
   fill: { height: 3, borderRadius: 2, backgroundColor: '#A7B2F0' },
   knob: {
@@ -747,8 +703,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
-    paddingHorizontal: 22,
+    marginTop: 12,
+    paddingHorizontal: 4,
   },
   playBtn: {
     width: 58,
@@ -774,7 +730,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginTop: 12,
     marginHorizontal: 18,
-    marginBottom: 16,
+    marginBottom: 12,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 14,
     paddingHorizontal: 14,
