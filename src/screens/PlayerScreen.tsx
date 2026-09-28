@@ -29,7 +29,7 @@ import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
 import { WordLookupCard } from '../components/WordLookupCard';
 
-const TABS = ['歌词', '翻译', '学习', '词汇'];
+const TABS = ['歌词', '翻译', '词汇'];
 
 /** 歌词行高估算值，用于把当前行滚到可视区 */
 const LYRIC_LINE_HEIGHT = 62;
