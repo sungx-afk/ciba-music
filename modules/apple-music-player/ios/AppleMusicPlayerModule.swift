@@ -125,9 +125,10 @@ public final class AppleMusicPlayerModule: Module {
       }
       Task { @MainActor in
         do {
-          // catalog 搜索依赖用户授权（订阅模块已触发过，这里兜底再确认一次）
-          let authorization = await MusicAuthorization.request()
-          guard authorization.status == .authorized else {
+          // catalog 搜索依赖用户授权（订阅模块已触发过，这里兜底再确认一次）。
+          // request() 的返回类型在不同 SDK 版本不一致，统一用 current.status 读取，避免类型推断歧义。
+          _ = await MusicAuthorization.request()
+          guard MusicAuthorization.current.status == .authorized else {
             promise.reject("not_authorized", "需要授权访问 Apple Music 才能搜索")
             return
           }
