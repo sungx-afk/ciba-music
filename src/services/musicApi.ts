@@ -272,7 +272,10 @@ export const MusicApi = {
       title: song.title,
       artist: song.artist,
       album: song.album,
-      duration: song.duration,
+      // MusicKit 返回的是带小数的秒（Double，如 125.373），服务端 duration 为 Integer，
+      // 直传 "125.373" 会让后端 Integer.parseInt 抛 NumberFormatException（For input string），
+      // 所以这里统一取整成秒再提交。
+      duration: Math.round(toNumber(song.duration, 0)),
       url: song.previewUrl || '',
       coverUrl: song.artworkUrl || '',
       appleId: song.id,
