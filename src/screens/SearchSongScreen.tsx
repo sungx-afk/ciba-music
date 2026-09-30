@@ -18,7 +18,8 @@ import { Colors } from '../theme/colors';
 import { formatDuration } from '../services/musicApi';
 import { showToast } from '../utils/toast';
 import { isPlayerAvailable, searchSongs, AppleMusicSong } from '../../modules/apple-music-player';
-import { addLocalSong } from '../services/localPlaylist';
+import { MusicApi } from '../services/musicApi';
+import { pushAddedSong } from '../services/addedSongsCache';
 
 /**
  * 搜索并添加歌曲：关键词 → 在 Apple Music 目录里搜索（MusicKit）。
@@ -95,14 +96,13 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
       return;
     }
     try {
-      // 临时本地加入：去重后写入 AsyncStorage，详情页会合并展示（后续接后端接口替换此逻辑）
-      const added = await addLocalSong(collectionId, song);
-      showToast(
-        added ? `已添加到「${collectionName}」` : '这首歌已经在歌单里了',
-        'info',
-      );
-    } catch {
-      showToast('添加失败，请重试', 'info');
+      // 保存到服务器：接口会先落库、再异步生成歌词与翻译
+      const added = await MusicApi.addMusicToCollection(collectionId, song);
+      // 乐观缓存：返回时详情页列表可能还没拉到它，先按真实 id 暂存，详情页合并时兜底
+      pushAddedSong(collectionId, added);
+      showToast(`已添加到「${collectionName}」· 歌词翻译生成中，稍后可在歌单查看`, 'info');
+    } catch (e: any) {
+      showToast(e?.message || '添加失败，请重试', 'info');
     }
   };
 
@@ -210,6 +210,12 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
             <Ionicons name="information-circle-outline" size={15} color={Colors.textMuted} />
             <Text style={styles.tipText}>
               输入歌曲名或歌手名，即可把歌曲添加到「{collectionName}」
+            </Text>
+          </View>
+          <View style={styles.tipBox}>
+            <Ionicons name="time-outline" size={15} color={Colors.textMuted} />
+            <Text style={styles.tipText}>
+              添加后歌曲先入库，歌词与双语翻译由服务器自动生成，稍候在歌单中即可看到
             </Text>
           </View>
         </View>

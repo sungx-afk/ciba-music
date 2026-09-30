@@ -15,7 +15,9 @@ import { StatusBar } from 'expo-status-bar';
 import { nowPlaying, playingLyrics } from '../data/mock';
 import {
   LyricLine,
+  MusicApi,
   MusicSong,
+  ExamPointAnalysis,
   formatMillis,
   parseLyricLines,
 } from '../services/musicApi';
@@ -29,6 +31,18 @@ import { showToast } from '../utils/toast';
 import { WordLookupCard } from '../components/WordLookupCard';
 
 const TABS = ['歌词', '翻译', '学习要点'];
+
+/** 考点分类对应的主题色（深色背景下用半透明底 + 亮色字） */
+const CATEGORY_THEME: Record<string, { bg: string; fg: string }> = {
+  词汇: { bg: 'rgba(91,108,217,0.22)', fg: '#A7B2F0' },
+  短语搭配: { bg: 'rgba(46,196,164,0.20)', fg: '#5FE3C0' },
+  语法: { bg: 'rgba(155,120,245,0.22)', fg: '#C4A9FF' },
+  句型: { bg: 'rgba(245,166,35,0.22)', fg: '#F5C542' },
+  修辞: { bg: 'rgba(255,122,158,0.20)', fg: '#FF9BB6' },
+};
+const DEFAULT_THEME = { bg: 'rgba(255,255,255,0.12)', fg: 'rgba(255,255,255,0.78)' };
+const categoryTheme = (cat?: string) =>
+  (cat && CATEGORY_THEME[cat]) || DEFAULT_THEME;
 
 /** 歌词行最小高度（仅是视觉用；滚动定位已改成 onLayout 实测，不再拿它算位置） */
 const LYRIC_LINE_HEIGHT = 62;
@@ -85,8 +99,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   const { user } = useAuth();
   const [repeat, setRepeat] = useState(false);
   const [shuffle, setShuffle] = useState(false);
-  /** 标记本歌「学习完成」：状态先本地保存，落库接口后续对接 */
-  const [done, setDone] = useState(false);
+  /** 标记本歌「学习完成」：初始值取自服务端回填的 learned（切歌时会重新同步） */
+  const [done, setDone] = useState(() => Boolean(current?.learned));
   const [tab, setTab] = useState('歌词');
   const [trackWidth, setTrackWidth] = useState(0);
   /** 示例模式没有音频，播放按钮只切个图标 */
@@ -143,6 +157,19 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   const coverUrl = isDemo ? '' : current!.coverUrl;
 
   const lines = useMemo(() => (isDemo ? DEMO_LINES : parseLyricLines(current)), [isDemo, current]);
+
+  /** 学习要点：把服务端 examPoints JSON 串解析成结构化数据（解析失败就当空） */
+  const examData = useMemo<ExamPointAnalysis | null>(() => {
+    const raw = current?.examPoints;
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as ExamPointAnalysis;
+      if (!parsed || (typeof parsed !== 'object')) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, [current?.examPoints]);
 
   /** 当前唱到哪一句：取最后一行 seconds 不超过播放进度的 */
   const activeLine = useMemo(() => {
@@ -257,6 +284,11 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     lyricRef.current?.scrollTo({ y: 0, animated: false });
   }, [current?.id]);
 
+  /** 切歌时同步「完成」状态（取自服务端回填的 learned），避免沿用上一首的状态 */
+  useEffect(() => {
+    setDone(Boolean(current?.learned));
+  }, [current?.id]);
+
   const togglePlay = async () => {
     // 示例模式没有音频，只切一下按钮状态
     if (isDemo) {
@@ -296,11 +328,24 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     if (!opened) showToast('暂时打不开订阅页，之后可以在首页再试', 'info');
   };
 
-  /** 标记 / 取消「本歌学习完成」；落库接口后续对接，先本地状态 + 提示 */
-  const toggleDone = () => {
+  /** 标记 / 取消「本歌学习完成」：调用服务端 /musics/{id}/learned */
+  const toggleDone = async () => {
     const next = !done;
+    // 先本地置位，体验更跟手
     setDone(next);
-    showToast(next ? '已标记为完成' : '已取消完成', 'success');
+    // 演示 / 无真实歌曲：仅本地状态
+    if (isDemo || !current?.id) {
+      showToast(next ? '已标记为完成' : '已取消完成', 'success');
+      return;
+    }
+    try {
+      await MusicApi.markLearned(current.id, next);
+      showToast(next ? '已标记为完成' : '已取消完成', 'success');
+    } catch (e: any) {
+      // 失败回滚本地状态
+      setDone(!next);
+      showToast(e?.message || '操作失败，请重试', 'info');
+    }
   };
 
   const onTrackPress = (event: any) => {
@@ -432,16 +477,66 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     );
   };
 
+  /** 学习要点：整体概述卡 + 逐条考点卡（分类配色、歌词原句、讲解） */
+  const renderExamPoints = () => {
+    const hasContent =
+      examData && (examData.summary || (examData.points && examData.points.length));
+    if (!hasContent) {
+      return (
+        <View style={styles.emptyPanel}>
+          <Ionicons name="school-outline" size={24} color={S.muted} />
+          <Text style={styles.emptyText}>本歌暂无学习要点</Text>
+        </View>
+      );
+    }
+    return (
+      <ScrollView
+        style={styles.lyricScroll}
+        contentContainerStyle={styles.examBody}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+      >
+        {(examData!.level || examData!.summary) && (
+          <View style={styles.examSummaryCard}>
+            {examData!.level ? (
+              <View style={styles.examLevelTag}>
+                <Ionicons name="ribbon-outline" size={12} color={S.gold} />
+                <Text style={styles.examLevelText}>{examData!.level}</Text>
+              </View>
+            ) : null}
+            {examData!.summary ? (
+              <Text style={styles.examSummary}>{examData!.summary}</Text>
+            ) : null}
+          </View>
+        )}
+        {(examData!.points || []).map((p, i) => {
+          const theme = categoryTheme(p.category);
+          return (
+            <View style={styles.examCard} key={i}>
+              <View style={styles.examCardHead}>
+                <View style={[styles.examCatTag, { backgroundColor: theme.bg }]}>
+                  <Text style={[styles.examCatText, { color: theme.fg }]}>{p.category || '考点'}</Text>
+                </View>
+                {p.point ? <Text style={styles.examPointTitle}>{p.point}</Text> : null}
+              </View>
+              {p.example ? (
+                <View style={styles.examExample}>
+                  <View style={styles.examQuoteBar} />
+                  <Text style={styles.examExampleText}>{p.example}</Text>
+                </View>
+              ) : null}
+              {p.analysis ? <Text style={styles.examAnalysis}>{p.analysis}</Text> : null}
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+  };
+
   const renderPanel = () => {
     if (tab === '歌词') return renderLyricLines(false);
     if (tab === '翻译') return renderLyricLines(true);
-    // 学习要点：内容后续对接，先占位
-    return (
-      <View style={styles.emptyPanel}>
-        <Ionicons name="school-outline" size={24} color={S.muted} />
-        <Text style={styles.emptyText}>本歌的学习要点数据待接口接入</Text>
-      </View>
-    );
+    return renderExamPoints();
   };
 
   return (
@@ -790,4 +885,68 @@ const styles = StyleSheet.create({
   learnHint: { fontSize: 11, lineHeight: 17, color: S.muted, marginTop: 12 },
   emptyPanel: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   emptyText: { fontSize: 13, color: S.muted },
+  /** 学习要点 */
+  examBody: { paddingBottom: 16, gap: 12 },
+  examSummaryCard: {
+    backgroundColor: 'rgba(245,197,66,0.10)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,66,0.24)',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  examLevelTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(245,197,66,0.16)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginBottom: 8,
+  },
+  examLevelText: { fontSize: 11, fontWeight: '700', color: S.gold },
+  examSummary: { fontSize: 13, lineHeight: 20, color: 'rgba(255,255,255,0.82)' },
+  examCard: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  examCardHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  examCatTag: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  examCatText: { fontSize: 10.5, fontWeight: '700' },
+  examPointTitle: {
+    flex: 1,
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  examExample: { flexDirection: 'row', marginTop: 10, gap: 8 },
+  examQuoteBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: S.accent,
+    marginTop: 2,
+  },
+  examExampleText: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontStyle: 'italic',
+    color: 'rgba(255,255,255,0.74)',
+  },
+  examAnalysis: {
+    fontSize: 12.5,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.62)',
+    marginTop: 10,
+  },
 });

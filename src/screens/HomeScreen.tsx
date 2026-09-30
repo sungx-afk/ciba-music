@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,10 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
-import { homeBanner } from '../data/mock';
 import { MusicApi, MusicCollection, formatDuration } from '../services/musicApi';
 import { RecentPlayItem, toMusicSong } from '../services/recentPlays';
+import { fetchNotebookStats, NotebookStats } from '../services/bookmarkApi';
 import { useRecentPlays } from '../hooks/useRecentPlays';
+import { useProgress } from '../storage/progressStore';
+import { useAuth } from '../context/AuthContext';
 import { AppleMusicPrompt } from '../components/AppleMusicPrompt';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 
@@ -55,9 +57,20 @@ function greetingByHour(hour: number): { text: string; emoji: string } {
   return { text: 'Good evening', emoji: '🌙' };
 }
 
-export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
+export const HomeScreen: React.FC<{ onOpen: OpenFn; onSwitchTab?: (tab: string) => void }> = ({
+  onOpen,
+  onSwitchTab,
+}) => {
   /** 真机状态栏会压住问候语，顶部留出安全区（底部由 TabBar 负责） */
   const insets = useSafeAreaInsets();
+  /** 登录态：生词本卡片按登录与否展示不同内容 */
+  const { isLoggedIn } = useProgress();
+  const { isLoading: authLoading } = useAuth();
+  /** 「生词本」卡片数据：学习目标 / 已学习 / 总数量 */
+  const [notebook, setNotebook] = useState<NotebookStats | null>(null);
+  const [loadingNotebook, setLoadingNotebook] = useState(false);
+  /** 生词本统计请求代次，避免旧结果覆盖新结果 */
+  const notebookReqRef = useRef(0);
   const [collections, setCollections] = useState<MusicCollection[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -65,6 +78,9 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
   /** 最近播放：自己订阅变更，播放页写入后这里自动刷新 */
   const recent = useRecentPlays();
   const [showClearRecent, setShowClearRecent] = useState(false);
+
+  /** 未登录（且登录态已确定）：精选歌单区统一引导登录、不展示任何歌单数据 */
+  const showLoginGate = !authLoading && !isLoggedIn;
 
   /** 顶部问候语随时间段变化：上午 / 下午 / 晚上，每分钟校准一次 */
   const [greeting, setGreeting] = useState(() => greetingByHour(new Date().getHours()));
@@ -99,9 +115,45 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
     }
   }, []);
 
+  /** 未登录不拉精选歌单数据：避免无谓请求，也满足「未登录不展示歌单」 */
   useEffect(() => {
+    if (authLoading) return;
+    if (!isLoggedIn) {
+      setCollections([]);
+      setLoading(false);
+      setError('');
+      return;
+    }
     void load();
-  }, [load]);
+  }, [authLoading, isLoggedIn, load]);
+
+  /** 生词本统计：学习目标 = day_limit、已学习 = today_learned_card_count、总数量 = card_count */
+  const loadNotebook = useCallback(async () => {
+    const req = ++notebookReqRef.current;
+    setLoadingNotebook(true);
+    try {
+      const stats = await fetchNotebookStats();
+      if (req !== notebookReqRef.current) return;
+      setNotebook(stats);
+    } catch {
+      if (req !== notebookReqRef.current) return;
+      setNotebook(null);
+    } finally {
+      setLoadingNotebook(false);
+    }
+  }, []);
+
+  /** 登录态/账号变化后刷新生词本数据；未登录时清空，避免串账号 */
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isLoggedIn) {
+      notebookReqRef.current += 1;
+      setNotebook(null);
+      setLoadingNotebook(false);
+      return;
+    }
+    void loadNotebook();
+  }, [authLoading, isLoggedIn, loadNotebook]);
 
   const openCollection = (item: MusicCollection) => {
     onOpen('Collection', {
@@ -109,6 +161,7 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
       collectionName: item.name,
       coverUrl: item.coverUrl,
       songCount: item.songCount,
+      type: item.type,
     });
   };
 
@@ -151,6 +204,177 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
     </TouchableOpacity>
   );
 
+  /** 未登录：精选歌单 / 搜索结果统一引导登录（点一下进登录页） */
+  const renderCollectionLoginGate = () => (
+    <TouchableOpacity
+      style={[styles.stateBox, styles.loginGateBox]}
+      activeOpacity={0.9}
+      onPress={() => onOpen('Login')}
+    >
+      <Ionicons name="lock-closed-outline" size={26} color={Colors.textMuted} />
+      <Text style={styles.stateText}>登录后可查看精选歌单</Text>
+      <View style={styles.loginGateBtn}>
+        <Text style={styles.loginGateBtnText}>去登录</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  /** 生词本指标：学习目标 / 已学习 / 总数量，一行三列、竖线分隔 */
+  const renderNotebookMetric = (label: string, value: number | string, accent: string) => (
+    <View style={styles.metricItem}>
+      <Text style={[styles.metricValue, { color: accent }]} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+
+  /** 生词本卡片（原「用音乐学英语」入口位）：标题行 + 三格指标 + 进入生词本入口 */
+  const renderNotebookCard = () => {
+    const dayLimit = notebook?.dayLimit ?? 0;
+    const learned = notebook?.learnedToday ?? 0;
+    const progress = dayLimit ? Math.min(1, learned / dayLimit) : 0;
+
+    if (authLoading) {
+      return (
+        <View style={styles.notebookCard}>
+          <View style={styles.loginStateWrap}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={styles.loginStateDesc}>正在读取登录状态…</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (!isLoggedIn) {
+      return (
+        <TouchableOpacity
+          style={styles.notebookCard}
+          activeOpacity={0.9}
+          onPress={() => onOpen('Login')}
+        >
+          <View style={styles.cardHeader}>
+            <View style={styles.cardIcon}>
+              <Ionicons name="book" size={17} color="#FFFFFF" />
+            </View>
+            <View style={styles.cardTitleWrap}>
+              <Text style={styles.cardTitle}>生词本</Text>
+              <Text style={styles.cardSubtitle}>登录后开始今日学习</Text>
+            </View>
+            <View style={styles.unloginTag}>
+              <Ionicons name="person-outline" size={13} color={Colors.textMuted} />
+              <Text style={styles.unloginTagText}>未登录</Text>
+            </View>
+          </View>
+          <View style={styles.unloginHintRow}>
+            <Ionicons name="lock-closed-outline" size={13} color={Colors.textMuted} />
+            <Text style={styles.unloginHintText}>登录后查看今日目标与生词本进度</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.notebookCard}
+        activeOpacity={0.9}
+        onPress={() => onSwitchTab?.('Bookmarks')}
+      >
+        <View style={styles.cardHeader}>
+          <View style={styles.cardIcon}>
+            <Ionicons name="book" size={17} color="#FFFFFF" />
+          </View>
+          <View style={styles.cardTitleWrap}>
+            <Text style={styles.cardTitle}>生词本</Text>
+            <Text style={styles.cardSubtitle} numberOfLines={1}>
+              {loadingNotebook
+                ? '正在获取生词本数据…'
+                : notebook
+                ? `今日目标 ${dayLimit} 个单词 · 共 ${notebook.totalWords} 词`
+                : '生词本数据获取失败'}
+            </Text>
+          </View>
+          {!loadingNotebook && dayLimit ? (
+            <View style={styles.percentBadge}>
+              <Text style={styles.percentBadgeText}>{Math.round(progress * 100)}%</Text>
+            </View>
+          ) : null}
+          <Ionicons name="chevron-forward" size={17} color={Colors.textMuted} />
+        </View>
+
+        <View style={styles.notebookMetrics}>
+          {renderNotebookMetric('学习目标', notebook?.dayLimit ?? '-', Colors.primary)}
+          <View style={styles.metricDivider} />
+          {renderNotebookMetric('已学习', notebook?.learnedToday ?? '-', Colors.textPrimary)}
+          <View style={styles.metricDivider} />
+          {renderNotebookMetric('总数量', notebook?.totalWords ?? '-', Colors.accent)}
+        </View>
+
+        <View style={styles.primaryCta}>
+          <Ionicons name="book-outline" size={16} color={Colors.primary} />
+          <Text style={styles.primaryCtaText}>进入生词本，开始今日学习</Text>
+          <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  /** 精选歌单内容：未登录显示登录引导；已登录显示加载 / 错误 / 列表 */
+  const collectionsContent = showLoginGate ? (
+    renderCollectionLoginGate()
+  ) : (
+    <View>
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>精选歌单</Text>
+        {collections.length > 0 ? (
+          <Text style={styles.sectionCount}>共 {collections.length} 个</Text>
+        ) : null}
+      </View>
+      {loading ? (
+        <View style={styles.stateBox}>
+          <ActivityIndicator color={Colors.blue} />
+          <Text style={styles.stateText}>正在加载歌单…</Text>
+        </View>
+      ) : null}
+      {!loading && error ? (
+        <View style={styles.stateBox}>
+          <Ionicons name="cloud-offline-outline" size={26} color={Colors.textMuted} />
+          <Text style={styles.stateText}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => load()}>
+            <Text style={styles.retryText}>重新加载</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {!loading && !error && collections.length === 0 ? (
+        <View style={styles.stateBox}>
+          <Ionicons name="musical-notes-outline" size={26} color={Colors.textMuted} />
+          <Text style={styles.stateText}>暂无歌单</Text>
+        </View>
+      ) : null}
+      {!loading && !error ? collections.map(renderCollectionCard) : null}
+    </View>
+  );
+
+  /** 搜索结果内容：未登录同样引导登录，不展示任何歌单数据 */
+  const searchContent = showLoginGate ? (
+    renderCollectionLoginGate()
+  ) : (
+    <View>
+      <View style={styles.resultHead}>
+        <Text style={styles.resultTitle}>搜索结果</Text>
+        <Text style={styles.resultCount}>{results.length} 个歌单</Text>
+      </View>
+      {results.length === 0 ? (
+        <View style={styles.stateBox}>
+          <Ionicons name="search-outline" size={26} color={Colors.textMuted} />
+          <Text style={styles.stateText}>没有找到「{query.trim()}」相关的歌单</Text>
+        </View>
+      ) : (
+        results.map(renderCollectionCard)
+      )}
+    </View>
+  );
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
@@ -190,52 +414,16 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
       >
+        {/* 精选歌单（含搜索结果）：未登录统一引导登录，不展示任何歌单数据 */}
         {query.trim() ? (
-          <View>
-            <View style={styles.resultHead}>
-              <Text style={styles.resultTitle}>搜索结果</Text>
-              <Text style={styles.resultCount}>{results.length} 个歌单</Text>
-            </View>
-            {results.length === 0 ? (
-              <View style={styles.stateBox}>
-                <Ionicons name="search-outline" size={26} color={Colors.textMuted} />
-                <Text style={styles.stateText}>没有找到「{query.trim()}」相关的歌单</Text>
-              </View>
-            ) : (
-              results.map(renderCollectionCard)
-            )}
-          </View>
+          searchContent
         ) : (
           <>
             {/* 未订阅 Apple Music 时的非阻断引导（内部自己判断要不要显示） */}
             <AppleMusicPrompt />
 
-        {/* 点「用音乐学英语」banner → 进入每日推荐歌曲页 */}
-        <TouchableOpacity
-          activeOpacity={0.96}
-          onPress={() => onOpen('DailyRecommend')}
-          style={styles.bannerTouch}
-        >
-          <LinearGradient
-            colors={homeBanner.colors}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.banner}
-          >
-            <View style={styles.bannerGlow} />
-            <View style={styles.bannerText}>
-              <Text style={styles.bannerTitle}>{homeBanner.title}</Text>
-              <Text style={styles.bannerDesc}>{homeBanner.desc}</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.bannerPlay}
-              activeOpacity={0.9}
-              onPress={() => onOpen('DailyRecommend')}
-            >
-              <Ionicons name="play" size={16} color="#fff" />
-            </TouchableOpacity>
-          </LinearGradient>
-        </TouchableOpacity>
+        {/* 生词本卡片（原「用音乐学英语」入口位）：进入生词本开始今日学习 */}
+        {renderNotebookCard()}
 
         {/* 最近播放：只有播过歌才出现，不占没用过的用户的版面 */}
         {recent.items.length > 0 ? (
@@ -289,38 +477,7 @@ export const HomeScreen: React.FC<{ onOpen: OpenFn }> = ({ onOpen }) => {
           </View>
         ) : null}
 
-        <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>精选歌单</Text>
-          {collections.length > 0 ? (
-            <Text style={styles.sectionCount}>共 {collections.length} 个</Text>
-          ) : null}
-        </View>
-
-        {loading ? (
-          <View style={styles.stateBox}>
-            <ActivityIndicator color={Colors.blue} />
-            <Text style={styles.stateText}>正在加载歌单…</Text>
-          </View>
-        ) : null}
-
-        {!loading && error ? (
-          <View style={styles.stateBox}>
-            <Ionicons name="cloud-offline-outline" size={26} color={Colors.textMuted} />
-            <Text style={styles.stateText}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => load()}>
-              <Text style={styles.retryText}>重新加载</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {!loading && !error && collections.length === 0 ? (
-          <View style={styles.stateBox}>
-            <Ionicons name="musical-notes-outline" size={26} color={Colors.textMuted} />
-            <Text style={styles.stateText}>暂无歌单</Text>
-          </View>
-        ) : null}
-
-        {!loading && !error ? collections.map(renderCollectionCard) : null}
+            {collectionsContent}
           </>
         )}
       </ScrollView>
@@ -375,45 +532,94 @@ const styles = StyleSheet.create({
   resultTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
   resultCount: { fontSize: 12, color: Colors.textMuted },
   body: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24 },
-  banner: {
-    height: 116,
-    borderRadius: 16,
-    padding: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    overflow: 'hidden',
-    /**
-     * 顶部间距由 banner 自己负责（它是常驻的，订阅提示条不一定显示）：
-     * 提示条显示时 → 搜索框 12 + 提示条 + 12 + banner；隐藏时 → 搜索框 12 + banner。
-     * 提示条自己只有 marginTop，别再让它管底部间距，否则真机上会和 banner 贴在一起。
-     */
-    marginTop: 12,
-  },
-  /** 外层可点击容器：裁剪圆角，让渐变背景被一起圆角裁掉 */
-  bannerTouch: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  bannerGlow: {
-    position: 'absolute',
-    right: -30,
-    bottom: -40,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  bannerText: { flex: 1 },
-  bannerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
-  bannerDesc: { fontSize: 12, color: 'rgba(255,255,255,0.72)', marginTop: 8 },
-  bannerPlay: {
-    width: 40,
-    height: 40,
+
+  /** ── 生词本卡片（原「用音乐学英语」入口位）── */
+  notebookCard: {
+    backgroundColor: Colors.card,
     borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.85)',
+    marginTop: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  cardHeader: { flexDirection: 'row', alignItems: 'center' },
+  cardIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 11,
+    backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  cardTitleWrap: { flex: 1, minWidth: 0, marginRight: 8 },
+  cardTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary, letterSpacing: 0.2 },
+  cardSubtitle: { marginTop: 3, fontSize: 12.5, color: Colors.textSecondary },
+  percentBadge: {
+    marginRight: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: Colors.surfaceSoft,
+  },
+  percentBadgeText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  notebookMetrics: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceSoft,
+  },
+  metricItem: { flex: 1, alignItems: 'center' },
+  metricValue: { fontSize: 22, fontWeight: '800', lineHeight: 26 },
+  metricLabel: { marginTop: 4, fontSize: 12, color: Colors.textSecondary },
+  metricDivider: { width: 1, height: 30, backgroundColor: Colors.border },
+  primaryCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 14,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceSoft,
+  },
+  primaryCtaText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
+  unloginTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: Colors.surfaceSoft,
+  },
+  unloginTagText: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
+  unloginHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: Colors.surfaceSoft,
+  },
+  unloginHintText: { flexShrink: 1, fontSize: 12, color: Colors.textMuted },
+  loginStateWrap: { alignItems: 'center', paddingTop: 8, paddingBottom: 2 },
+  loginStateDesc: {
+    marginTop: 6,
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   sectionHead: {
     flexDirection: 'row',
@@ -454,6 +660,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  /** 未登录：精选歌单引导登录 */
+  loginGateBox: { marginTop: 22, gap: 12 },
+  loginGateBtn: {
+    marginTop: 4,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: Colors.blue,
+  },
+  loginGateBtnText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
   stateText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
   retryBtn: {
     marginTop: 2,

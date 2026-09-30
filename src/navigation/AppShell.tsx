@@ -94,7 +94,7 @@ export const AppShell: React.FC = () => {
   const renderTab = () => {
     if (tab === 'Bookmarks') return <BookmarksScreen navigation={navAdapter} />;
     if (tab === 'Profile') return <ProfileScreen onOpen={open} />;
-    return <HomeScreen onOpen={open} />;
+    return <HomeScreen onOpen={open} onSwitchTab={setTab} />;
   };
 
   return (

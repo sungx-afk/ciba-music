@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { MusicApi, MusicSong, formatDuration } from '../services/musicApi';
-import { getLocalSongs, subscribeLocalSongs, mapAppleSongToMusicSong } from '../services/localPlaylist';
+import { takeAddedSongs } from '../services/addedSongsCache';
 import { clearVipGateCache, isVipUser, FREE_SONG_LIMIT } from '../services/vipGate';
 import { useAuth } from '../context/AuthContext';
 import { ConfirmDialog, DialogPayload } from '../components/ConfirmDialog';
@@ -43,6 +43,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   const insets = useSafeAreaInsets();
   const collectionId = Number(params?.collectionId);
   const collectionName = String(params?.collectionName || '歌单');
+  /** 仅个人歌单（type=1）支持搜索添加歌曲；精选 / 官方歌单（type=0 或缺省）不显示 + 号 */
+  const canAddSongs = Number(params?.type) === 1;
   /** 当前账号是否会员：非会员只能看到前 FREE_SONG_LIMIT 首 */
   const { user } = useAuth();
   const [isVip, setIsVip] = useState(() => Number((user as any)?.vip) === 1);
@@ -50,11 +52,11 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   const [dialog, setDialog] = useState<DialogPayload | null>(null);
 
   const [songs, setSongs] = useState<MusicSong[]>([]);
-  /** 本地从 Apple Music 加入的歌曲（临时存储，后续接后端接口替换） */
-  const [localSongs, setLocalSongs] = useState<MusicSong[]>([]);
   const [total, setTotal] = useState(Number(params?.songCount) || 0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** 下拉刷新状态：不触发整页 loading，列表保持可见、顶部转圈 */
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [tab, setTab] = useState<StudyTab>('learning');
@@ -72,10 +74,19 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
         setLoadingMore(true);
       }
       try {
-        // TODO: 学习状态由后端下发后，这里补 status 参数（学习中 / 已学习分页独立）
-        const res = await MusicApi.getCollectionSongs(collectionId, start, PAGE_SIZE);
+        // 学习中 tab=0，已学 tab=1；后端按当前用户 tbl_music_learned 过滤
+        const learned = tab === 'learned' ? 1 : 0;
+        const res = await MusicApi.getCollectionSongs(collectionId, start, PAGE_SIZE, learned);
         setTotal(res.total || Number(params?.songCount) || 0);
-        setSongs((prev) => (start === 0 ? res.list : [...prev, ...res.list]));
+        if (start === 0) {
+          const pending = takeAddedSongs(collectionId);
+          // 补救：后端异步生成歌词期间，刚加的歌可能还没出现在列表里，
+          // 把乐观缓存的（带真实 id）先插到头部；列表已返回同 id 则去重，不会重复
+          const pendingNew = pending.filter((s) => !res.list.some((x) => x.id === s.id));
+          setSongs([...pendingNew, ...res.list]);
+        } else {
+          setSongs((prev) => [...prev, ...res.list]);
+        }
       } catch (e: any) {
         const msg = e?.message || '歌曲加载失败';
         if (start === 0) {
@@ -89,8 +100,26 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
         setLoadingMore(false);
       }
     },
-    [collectionId, params?.songCount],
+    [collectionId, params?.songCount, tab],
   );
+
+  /** 下拉刷新：重新拉第一页，不显示整页 loading，列表保持可见 */
+  const refresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const learned = tab === 'learned' ? 1 : 0;
+      const res = await MusicApi.getCollectionSongs(collectionId, 0, PAGE_SIZE, learned);
+      setTotal(res.total || Number(params?.songCount) || 0);
+      const pending = takeAddedSongs(collectionId);
+      const pendingNew = pending.filter((s) => !res.list.some((x) => x.id === s.id));
+      setSongs([...pendingNew, ...res.list]);
+    } catch (e: any) {
+      showToast(e?.message || '刷新失败', 'info');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, collectionId, params?.songCount]);
 
   useEffect(() => {
     void load(0);
@@ -100,36 +129,11 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
     };
   }, [load]);
 
-  /** 本地从 Apple Music 加入的歌曲：挂载读取 + 订阅搜索页的添加事件刷新 */
-  useEffect(() => {
-    let alive = true;
-    const reloadLocal = async () => {
-      const list = await getLocalSongs(collectionId);
-      if (alive) setLocalSongs(list.map(mapAppleSongToMusicSong));
-    };
-    void reloadLocal();
-    const unsub = subscribeLocalSongs(collectionId, reloadLocal);
-    return () => {
-      alive = false;
-      unsub();
-    };
-  }, [collectionId]);
-
   /**
-   * 展示列表 = 本地加入的歌曲（头部）+ 后端歌单歌曲。
-   * 分页游标、hasMore 仍只用后端 songs，本地歌曲不参与翻页。
+   * 展示列表 = 后端按当前 tab 的 learned 过滤后返回的歌曲（学习中=0 / 已学=1）。
+   * 学习状态由服务端 tbl_music_learned 判定，切 tab 会重新拉取。
    */
-  const displaySongs = useMemo(() => [...localSongs, ...songs], [localSongs, songs]);
-
-  /**
-   * 分区过滤。
-   * 后端目前还没有下发学习状态字段，此时两个 tab 都展示全部歌曲（不至于看起来像坏了）；
-   * 一旦响应里带上 studyStatus（2 = 已学习），就自动按 tab 分流。
-   */
-  const hasStudyStatus = displaySongs.some((s) => s.studyStatus !== undefined && s.studyStatus !== null);
-  const visibleSongs = hasStudyStatus
-    ? displaySongs.filter((s) => (tab === 'learned' ? s.studyStatus === 2 : s.studyStatus !== 2))
-    : displaySongs;
+  const visibleSongs = songs;
 
   /**
    * 会员状态：进页面时校准一次（非会员默认按受限展示，避免先闪出全部歌曲）。
@@ -151,7 +155,7 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   /** 被会员限制藏起来的数量（> 0 时列表底部出升级提示） */
   const lockedCount = Math.max(0, visibleSongs.length - listSongs.length);
   /** 歌单歌曲总数，用于升级提示里的「解锁全部 N 首」 */
-  const totalCount = Math.max(total + localSongs.length, visibleSongs.length);
+  const totalCount = Math.max(total, visibleSongs.length);
 
   const hasMore = songs.length > 0 && songs.length < total;
 
@@ -249,6 +253,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
   };
 
   const openSearch = () => {
+    // 仅个人歌单（type=1）支持搜索添加，精选 / 官方歌单不开放
+    if (!canAddSongs) return;
     // 非会员不能往歌单里加歌：弹开通提示
     if (!isVip) {
       setDialog({
@@ -332,6 +338,8 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
         data={listSongs}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderSong}
+        refreshing={refreshing}
+        onRefresh={refresh}
         ListFooterComponent={renderFooter}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
@@ -381,9 +389,11 @@ export const CollectionDetailScreen: React.FC<Props> = ({ params, onOpen, onBack
           })}
         </View>
         <View style={styles.toolActions}>
-          <TouchableOpacity style={styles.addBtn} activeOpacity={0.8} onPress={openSearch}>
-            <Ionicons name="add" size={18} color={Colors.blueDeep} />
-          </TouchableOpacity>
+          {canAddSongs && (
+            <TouchableOpacity style={styles.addBtn} activeOpacity={0.8} onPress={openSearch}>
+              <Ionicons name="add" size={18} color={Colors.blueDeep} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.playAllBtn} activeOpacity={0.85} onPress={playAll}>
             <Ionicons name="play" size={12} color="#fff" />
             <Text style={styles.playAllText}>播放全部</Text>

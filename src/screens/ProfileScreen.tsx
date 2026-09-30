@@ -349,6 +349,32 @@ export const ProfileScreen: React.FC<{ onOpen?: OpenFn }> = ({ onOpen }) => {
           )}
         </View>
 
+        {/* 未付费（游客 / 免费用户）：引导开通会员，点一下进付费页 */}
+        {!isVip && (
+          <TouchableOpacity
+            style={styles.vipPromo}
+            activeOpacity={0.9}
+            onPress={() => open('Purchase')}
+          >
+            <LinearGradient
+              colors={['#FFE7B0', '#F5B544']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.vipPromoInner}>
+              <View style={styles.vipPromoLeft}>
+                <Ionicons name="diamond" size={20} color="#7A4B00" />
+                <View style={styles.vipPromoText}>
+                  <Text style={styles.vipPromoTitle}>开通 VIP 会员</Text>
+                  <Text style={styles.vipPromoSub}>解锁全部歌曲 · 全曲播放 · 逐句跟读</Text>
+                </View>
+              </View>
+              <Text style={styles.vipPromoBtn}>去开通</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* 学习统计 */}
         <View style={styles.sectionCard}>
           <Text style={styles.cardHeaderTitle}>学习统计</Text>
@@ -558,6 +584,35 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   loginBtnSmallText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+
+  // 未付费用户开通会员引导
+  vipPromo: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: 16,
+    marginTop: 16,
+  },
+  vipPromoInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  vipPromoLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 },
+  vipPromoText: { flex: 1, minWidth: 0 },
+  vipPromoTitle: { fontSize: 15, fontWeight: '800', color: '#7A4B00' },
+  vipPromoSub: { fontSize: 11, color: 'rgba(122,75,0,0.78)', marginTop: 3 },
+  vipPromoBtn: {
+    backgroundColor: '#7A4B00',
+    color: '#FFE7B0',
+    fontSize: 13,
+    fontWeight: '800',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
 
   // 卡片通用
   sectionCard: {

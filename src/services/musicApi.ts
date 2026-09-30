@@ -1,4 +1,5 @@
 import { api } from './api';
+import { AppleMusicSong } from '../../modules/apple-music-player';
 
 /**
  * 听歌学英语的音乐接口。
@@ -19,6 +20,8 @@ export interface MusicCollection {
   description: string;
   songCount: number;
   sortOrder: number;
+  /** 歌单类型：1=个人歌单（可搜索添加歌曲），0=精选/官方歌单（不可添加） */
+  type?: number;
 }
 
 export interface MusicSong {
@@ -53,6 +56,35 @@ export interface MusicSong {
   appleId?: number;
   /** 国际录音码，Apple Music 目录匹配用 */
   isrc?: string;
+  /** 当前登录用户是否已学该歌（服务器按 tbl_music_learned 回填） */
+  learned?: boolean;
+  /**
+   * 学习要点：AI 据歌词分析的考点，服务端存为 JSON 字符串。
+   * 结构见 ExamPointAnalysis：{ summary, level, points: [{ category, point, example, analysis }] }
+   */
+  examPoints?: string;
+}
+
+/** 单个考点（对应服务端 ExamPoint） */
+export interface ExamPointItem {
+  /** 分类：词汇 / 短语搭配 / 语法 / 句型 / 修辞 等 */
+  category?: string;
+  /** 考点名称，如「虚拟语气」「take it easy」 */
+  point?: string;
+  /** 歌词中的原文例句 */
+  example?: string;
+  /** 考点讲解 */
+  analysis?: string;
+}
+
+/** 整首歌的考点分析（对应服务端 ExamPointAnalysis） */
+export interface ExamPointAnalysis {
+  /** 整体概述 */
+  summary?: string;
+  /** 建议适配的考试 / 难度级别，如 CET-4、考研 */
+  level?: string;
+  /** 考点明细 */
+  points?: ExamPointItem[];
 }
 
 /** 一行双语歌词：seconds 用于跟播放进度对齐 */
@@ -179,16 +211,19 @@ export const MusicApi = {
       description: toText(item.description),
       songCount: toNumber(item.songCount),
       sortOrder: toNumber(item.sortOrder),
+      type: toNumber(item.type),
     }));
   },
 
-  /** 歌单下的歌曲，按 start/limit 翻页 */
+  /** 歌单下的歌曲，按 start/limit 翻页；learned 传 0/1 时按学习状态过滤 */
   getCollectionSongs: async (
     collectionId: number,
     start = 0,
     limit = 20,
+    /** 学习状态过滤：0=学习中，1=已学；不传则返回全部 */
+    learned?: number,
   ): Promise<{ list: MusicSong[]; total: number }> => {
-    const res = await api.get<ListEnvelope>('/musics', { collectionId, start, limit });
+    const res = await api.get<ListEnvelope>('/musics', { collectionId, start, limit, learned });
     const raw = Array.isArray(res?.list) ? res.list : [];
     return {
       total: toNumber(res?.total, 0),
@@ -215,7 +250,77 @@ export const MusicApi = {
             : toNumber(item.previewStartSec),
         appleId: item.appleId === undefined || item.appleId === null ? undefined : toNumber(item.appleId),
         isrc: toText(item.isrc) || undefined,
+        learned: Boolean(item.learned),
+        examPoints: toText(item.examPoints) || undefined,
       })),
     };
+  },
+
+  /**
+   * 把 Apple Music 搜到的歌加入歌单（保存到服务器）。
+   * POST /music/collections/{id}/musics
+   *
+   * 不传 musicId，后端按 title/artist/album 等新建一首，并自动跑
+   * 抓取歌词 → AI 翻译 → 整理 JSON → 回写 → 分析考点的完整流程。
+   * 该歌单必须是当前登录用户的个人歌单，否则后端返回登录 / 权限错误。
+   *
+   * 入参用 Apple Music 原始结构，映射成后端字段只在这里做：
+   *   title/artist/album/duration 直传；url=试听片段；coverUrl=封面；appleId=目录 id。
+   */
+  addMusicToCollection: async (collectionId: number, song: AppleMusicSong): Promise<MusicSong> => {
+    const res = await api.postForm<{ music?: any }>(`/music/collections/${collectionId}/musics`, {
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration: song.duration,
+      url: song.previewUrl || '',
+      coverUrl: song.artworkUrl || '',
+      appleId: song.id,
+    });
+    const m = res?.music;
+    return m
+      ? {
+          id: toNumber(m.id),
+          title: toText(m.title),
+          artist: toText(m.artist),
+          album: toText(m.album),
+          duration: toNumber(m.duration),
+          url: toText(m.url),
+          coverUrl: toText(m.coverUrl),
+          description: toText(m.description),
+          sortOrder: toNumber(m.sortOrder),
+          studyStatus:
+            m.studyStatus === undefined || m.studyStatus === null ? undefined : toNumber(m.studyStatus),
+          lyric: toText(m.lyric),
+          bilingualLyric: toText(m.bilingualLyric),
+          previewStartSec:
+            m.previewStartSec === undefined || m.previewStartSec === null
+              ? undefined
+              : toNumber(m.previewStartSec),
+          appleId: m.appleId === undefined || m.appleId === null ? undefined : toNumber(m.appleId),
+          isrc: toText(m.isrc) || undefined,
+          examPoints: toText(m.examPoints) || undefined,
+        }
+      : {
+          id: 0,
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          duration: song.duration,
+          url: song.previewUrl || '',
+          coverUrl: song.artworkUrl || '',
+          description: '',
+          sortOrder: 0,
+          appleId: Number(song.id) || undefined,
+        };
+  },
+
+  /**
+   * 标记 / 取消歌曲「已学」（按当前登录用户）。
+   * POST /musics/{id}/learned?learned=1
+   * learned=true 标记已学，false 取消已学；结果写进服务端 tbl_music_learned。
+   */
+  markLearned: async (songId: number, learned: boolean): Promise<void> => {
+    await api.postForm(`/musics/${songId}/learned`, { learned: learned ? 1 : 0 });
   },
 };
