@@ -24,6 +24,8 @@ public final class AppleMusicPlayerModule: Module {
   private var pollTimer: Timer?
   /// 上一次播放状态，用于识别「自然播完」
   private var lastStatus: String = "stopped"
+  /// 自然播完标记，避免一首歌重复触发 finished
+  private var finishedFired = false
 
   public func definition() -> ModuleDefinition {
     Name("AppleMusicPlayer")
@@ -51,6 +53,7 @@ public final class AppleMusicPlayerModule: Module {
           self.currentDuration = song.duration ?? 0
           try await player.play()
           self.lastStatus = "playing"
+          self.finishedFired = false
           self.startPolling()
           promise.resolve(["duration": self.currentDuration])
         } catch {
@@ -68,6 +71,7 @@ public final class AppleMusicPlayerModule: Module {
         do {
           try await ApplicationMusicPlayer.shared.play()
           self.lastStatus = "playing"
+          self.finishedFired = false
           self.startPolling()
           promise.resolve()
         } catch {
@@ -197,8 +201,14 @@ public final class AppleMusicPlayerModule: Module {
       "position": time.isNaN ? 0 : time,
       "duration": currentDuration,
     ]
-    // playing -> stopped 视为自然播完（手动 stop 时 lastStatus 不是 playing）
-    if lastStatus == "playing" && status == "stopped" {
+    // 自然播完识别：
+    // ① 常规情况 playing -> stopped（手动 stop 时 lastStatus 已是 stopped，不会误触发）；
+    // ② 个别 iOS 版本 MusicKit 在末尾不把状态切到 stopped（仍停在 playing 但进度已到头），
+    //    用「进度到末尾」兜底，避免真机全曲放完不切下一首。
+    if !finishedFired,
+       lastStatus == "playing",
+       (status == "stopped" || (status == "playing" && currentDuration > 0 && time >= currentDuration - 0.8)) {
+      finishedFired = true
       payload["finished"] = true
       stopPolling()
     }

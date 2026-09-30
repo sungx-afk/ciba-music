@@ -48,6 +48,8 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
   const [results, setResults] = useState<AppleMusicSong[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 正在添加中的歌曲 id：接口返回慢，按钮先转圈并禁用，给明确反馈 */
+  const [addingId, setAddingId] = useState<string | null>(null);
 
   /** 只认最后一次请求的结果，避免快速输入时旧请求覆盖新结果 */
   const reqRef = useRef(0);
@@ -95,6 +97,9 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
       showToast('该歌单暂不支持添加', 'info');
       return;
     }
+    // 接口返回慢，先屏蔽重复点击并让按钮转圈
+    if (addingId) return;
+    setAddingId(song.id);
     try {
       // 保存到服务器：接口会先落库、再异步生成歌词与翻译
       const added = await MusicApi.addMusicToCollection(collectionId, song);
@@ -103,6 +108,8 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
       showToast(`已添加到「${collectionName}」· 歌词翻译生成中，稍后可在歌单查看`, 'info');
     } catch (e: any) {
       showToast(e?.message || '添加失败，请重试', 'info');
+    } finally {
+      setAddingId(null);
     }
   };
 
@@ -124,8 +131,17 @@ export const SearchSongScreen: React.FC<Props> = ({ params, onBack }) => {
         </Text>
       </View>
       <Text style={styles.duration}>{formatDuration(item.duration)}</Text>
-      <TouchableOpacity style={styles.addRowBtn} onPress={() => handleAdd(item)} activeOpacity={0.8}>
-        <Ionicons name="add" size={16} color="#fff" />
+      <TouchableOpacity
+        style={styles.addRowBtn}
+        onPress={() => handleAdd(item)}
+        activeOpacity={0.8}
+        disabled={addingId === item.id}
+      >
+        {addingId === item.id ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Ionicons name="add" size={16} color="#fff" />
+        )}
       </TouchableOpacity>
     </View>
   );

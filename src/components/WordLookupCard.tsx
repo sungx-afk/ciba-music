@@ -75,6 +75,7 @@ export const WordLookupCard: React.FC<Props> = ({ wordName, onClose }) => {
       await addWordToBookmark(detail.wordName);
       setAdded(true);
       showToast('已加入生词本', 'success');
+      onClose();
     } catch (e: any) {
       showToast(e?.message || '加入生词本失败', 'info');
     } finally {

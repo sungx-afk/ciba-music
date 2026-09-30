@@ -29,10 +29,11 @@ import { accountIdOf, recordRecentPlay } from '../services/recentPlays';
 import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
 import { WordLookupCard } from '../components/WordLookupCard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const TABS = ['歌词', '翻译', '学习要点'];
+const TABS = ['歌词', '学习要点'];
 
-/** 考点分类对应的主题色（深色背景下用半透明底 + 亮色字） */
+/** 考点分类对应的主题色（学习要点面板为白底，深色下用半透明底 + 亮色字） */
 const CATEGORY_THEME: Record<string, { bg: string; fg: string }> = {
   词汇: { bg: 'rgba(91,108,217,0.22)', fg: '#A7B2F0' },
   短语搭配: { bg: 'rgba(46,196,164,0.20)', fg: '#5FE3C0' },
@@ -40,12 +41,22 @@ const CATEGORY_THEME: Record<string, { bg: string; fg: string }> = {
   句型: { bg: 'rgba(245,166,35,0.22)', fg: '#F5C542' },
   修辞: { bg: 'rgba(255,122,158,0.20)', fg: '#FF9BB6' },
 };
+/** 白底模式下的深色字配色（对比度更高） */
+const CATEGORY_THEME_LIGHT: Record<string, { bg: string; fg: string }> = {
+  词汇: { bg: 'rgba(91,108,217,0.12)', fg: '#3A47A0' },
+  短语搭配: { bg: 'rgba(46,196,164,0.14)', fg: '#0F8A6E' },
+  语法: { bg: 'rgba(155,120,245,0.14)', fg: '#6A3FD0' },
+  句型: { bg: 'rgba(245,166,35,0.16)', fg: '#B5790A' },
+  修辞: { bg: 'rgba(255,122,158,0.14)', fg: '#C23A66' },
+};
 const DEFAULT_THEME = { bg: 'rgba(255,255,255,0.12)', fg: 'rgba(255,255,255,0.78)' };
-const categoryTheme = (cat?: string) =>
-  (cat && CATEGORY_THEME[cat]) || DEFAULT_THEME;
+const DEFAULT_THEME_LIGHT = { bg: 'rgba(0,0,0,0.06)', fg: '#555' };
+const categoryTheme = (cat?: string, light = false) =>
+  (cat && (light ? CATEGORY_THEME_LIGHT : CATEGORY_THEME)[cat]) ||
+  (light ? DEFAULT_THEME_LIGHT : DEFAULT_THEME);
 
 /** 歌词行最小高度（仅是视觉用；滚动定位已改成 onLayout 实测，不再拿它算位置） */
-const LYRIC_LINE_HEIGHT = 62;
+const LYRIC_LINE_HEIGHT = 72;
 
 type OpenFn = (name: string, params?: Record<string, any>) => void;
 
@@ -102,6 +113,24 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   /** 标记本歌「学习完成」：初始值取自服务端回填的 learned（切歌时会重新同步） */
   const [done, setDone] = useState(() => Boolean(current?.learned));
   const [tab, setTab] = useState('歌词');
+  /** 歌词 tab 下是否显示下方中文译文（记住用户选择） */
+  const [showZh, setShowZh] = useState(true);
+  /** 启动后读取持久化的译文显隐偏好 */
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem('player_show_zh')
+      .then((v) => {
+        if (alive && v != null) setShowZh(v !== '0');
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** 译文显隐变化即写回本地，下次进播放页沿用 */
+  useEffect(() => {
+    AsyncStorage.setItem('player_show_zh', showZh ? '1' : '0').catch(() => {});
+  }, [showZh]);
   const [trackWidth, setTrackWidth] = useState(0);
   /** 示例模式没有音频，播放按钮只切个图标 */
   const [demoPlaying, setDemoPlaying] = useState(true);
@@ -269,10 +298,10 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     lyricOffsets.current = [];
   }, [tab]);
 
-  /** 歌词跟着播放进度滚 */
+  /** 歌词跟着播放进度滚；切译文显隐时整段行高变化，也要把当前行重新对位 */
   useEffect(() => {
     scrollToLine(activeLine, true);
-  }, [activeLine, tab, scrollToLine]);
+  }, [activeLine, tab, showZh, scrollToLine]);
 
   /**
    * 切歌：歌词拉回顶部。
@@ -386,7 +415,7 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     });
   };
 
-  const renderLyricLines = (zhOnly: boolean) => {
+  const renderLyricLines = () => {
     if (!lines.length) {
       return (
         <View style={styles.emptyPanel}>
@@ -425,21 +454,6 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
           /** 试听区间之外的歌词听不到，压暗一点，点它会提示片段长度 */
           const outOfRange = showWindow && l.seconds * 1000 > windowEnd;
           const dimmed = outOfRange ? styles.dimmed : null;
-          if (zhOnly) {
-            return (
-              <TouchableOpacity
-                key={`${l.seconds}-${i}`}
-                onPress={() => seek(l.seconds * 1000)}
-                onLayout={(e) => {
-                  lyricOffsets.current[i] = e.nativeEvent.layout.y;
-                  // 量到的正好是当前行就精确纠一次位（首次挂载时 activeLine 效应可能早于布局）
-                  if (i === activeLine) scrollToLine(i, false);
-                }}
-              >
-                <Text style={[styles.zhOnly, dimmed, on && styles.zhOnlyOn]}>{l.zh || l.en}</Text>
-              </TouchableOpacity>
-            );
-          }
           return (
             <View
               key={`${l.seconds}-${i}`}
@@ -456,17 +470,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
                 <Text style={[styles.lyricEn, dimmed, on && styles.lyricEnOn]}>
                   {renderWordSpans(l.en)}
                 </Text>
-                {/* 跳转播放进度改到这里：点时间戳，和单词点击互不干扰 */}
-                <TouchableOpacity
-                  style={styles.lyricTimeBtn}
-                  onPress={() => seek(l.seconds * 1000)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.lyricTime}>{l.time}</Text>
-                </TouchableOpacity>
               </View>
-              {l.zh ? (
+              {showZh && l.zh ? (
                 <Text style={[styles.lyricZh, dimmed, on && styles.lyricZhOn]}>{l.zh}</Text>
               ) : null}
             </View>
@@ -479,13 +484,15 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
 
   /** 学习要点：整体概述卡 + 逐条考点卡（分类配色、歌词原句、讲解） */
   const renderExamPoints = () => {
+    /** 学习要点面板是白底，考点分类标签 / 文案全部走深色配色 */
+    const light = tab === '学习要点';
     const hasContent =
       examData && (examData.summary || (examData.points && examData.points.length));
     if (!hasContent) {
       return (
         <View style={styles.emptyPanel}>
-          <Ionicons name="school-outline" size={24} color={S.muted} />
-          <Text style={styles.emptyText}>本歌暂无学习要点</Text>
+          <Ionicons name="school-outline" size={24} color="#B7B7B7" />
+          <Text style={[styles.emptyText, styles.emptyTextLight]}>本歌暂无学习要点</Text>
         </View>
       );
     }
@@ -510,7 +517,7 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
           </View>
         )}
         {(examData!.points || []).map((p, i) => {
-          const theme = categoryTheme(p.category);
+          const theme = categoryTheme(p.category, light);
           return (
             <View style={styles.examCard} key={i}>
               <View style={styles.examCardHead}>
@@ -534,9 +541,8 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   };
 
   const renderPanel = () => {
-    if (tab === '歌词') return renderLyricLines(false);
-    if (tab === '翻译') return renderLyricLines(true);
-    return renderExamPoints();
+    if (tab === '学习要点') return renderExamPoints();
+    return renderLyricLines();
   };
 
   return (
@@ -554,20 +560,16 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
         style={styles.glow}
       />
 
-      {/* 顶部：返回 / 收藏 / 更多 */}
+      {/* 顶部：返回 / 封面 / 歌名 + 作者 / 完成标记 合并一行，整体更矮 */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={onBack} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
-      </View>
-
-      {/* 歌曲信息（简化：缩小封面，只留歌名 + 作者；右侧「完成」标记） */}
-      <View style={styles.headRow}>
         {coverUrl ? (
           <Image source={{ uri: coverUrl }} style={styles.cover} />
         ) : (
           <View style={styles.coverFallback}>
-            <Ionicons name="musical-notes" size={22} color="rgba(255,255,255,0.82)" />
+            <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.82)" />
           </View>
         )}
         <View style={styles.headInfo}>
@@ -592,21 +594,39 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
         </TouchableOpacity>
       </View>
 
-      {/* 分区：歌词 / 翻译 / 学习要点 */}
-      <View style={styles.segment}>
-        {TABS.map((t) => (
+      {/* 分区：歌词 / 学习要点；歌词 tab 右侧可切换中文译文显隐 */}
+      <View style={styles.segmentRow}>
+        <View style={styles.segment}>
+          {TABS.map((t) => (
+            <TouchableOpacity
+              key={t}
+              style={[styles.segItem, tab === t && styles.segItemOn]}
+              onPress={() => setTab(t)}
+            >
+              <Text style={[styles.segText, tab === t && styles.segTextOn]}>{t}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {tab === '歌词' ? (
           <TouchableOpacity
-            key={t}
-            style={[styles.segItem, tab === t && styles.segItemOn]}
-            onPress={() => setTab(t)}
+            style={styles.zhToggle}
+            onPress={() => setShowZh((v) => !v)}
+            activeOpacity={0.8}
           >
-            <Text style={[styles.segText, tab === t && styles.segTextOn]}>{t}</Text>
+            <Ionicons
+              name={showZh ? 'eye-outline' : 'eye-off-outline'}
+              size={16}
+              color={S.textSub}
+            />
+            <Text style={styles.zhToggleText}>{showZh ? '隐藏译文' : '显示译文'}</Text>
           </TouchableOpacity>
-        ))}
+        ) : null}
       </View>
 
-      {/* 中间：只有这一块滚动（歌词 / 翻译 / 学习要点） */}
-      <View style={styles.panel}>{renderPanel()}</View>
+      {/* 中间：只有这一块滚动（歌词 / 学习要点）；学习要点为白底 */}
+      <View style={[styles.panel, tab === '学习要点' && styles.panelLight]}>
+        {renderPanel()}
+      </View>
 
       {/* 底部：进度 + 播放控制（整体移到底部） */}
       <View style={styles.bottom}>
@@ -657,7 +677,13 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
 
         {/* 播放控制：上一曲 / 播放暂停 / 下一曲 + 随机 / 循环 */}
         <View style={styles.controls}>
-          <TouchableOpacity onPress={() => setShuffle(!shuffle)}>
+          <TouchableOpacity
+            onPress={() => {
+              const next = !shuffle;
+              setShuffle(next);
+              showToast(next ? '随机播放：已开启' : '随机播放：已关闭', 'info');
+            }}
+          >
             <Ionicons name="shuffle" size={19} color={shuffle ? S.gold : S.textSub} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => goTo(index - 1)} disabled={!playlist.length}>
@@ -681,7 +707,13 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
               color={playlist.length ? '#fff' : 'rgba(255,255,255,0.3)'}
             />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setRepeat(!repeat)}>
+          <TouchableOpacity
+            onPress={() => {
+              const next = !repeat;
+              setRepeat(next);
+              showToast(next ? '单曲循环：已开启' : '单曲循环：已关闭', 'info');
+            }}
+          >
             <Ionicons name="repeat" size={19} color={repeat ? S.gold : S.textSub} />
           </TouchableOpacity>
         </View>
@@ -708,21 +740,22 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 6,
+    gap: 12,
   },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   headRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, marginTop: 16 },
   cover: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: 8,
     overflow: 'hidden',
   },
   coverFallback: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
@@ -739,7 +772,7 @@ const styles = StyleSheet.create({
   },
   sun: { width: 74, height: 74, borderRadius: 37 },
   coverBottom: { fontSize: 8, letterSpacing: 2, color: 'rgba(255,255,255,0.8)', fontWeight: '600' },
-  headInfo: { flex: 1, marginLeft: 12 },
+  headInfo: { flex: 1, marginLeft: 0 },
   songTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
   songArtist: { fontSize: 12, color: S.textSub, marginTop: 4 },
   /** 右侧「完成 / 已完成」标记 */
@@ -835,10 +868,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  segment: {
+  /** 分区条 + 右侧译文切换：同处一行，整体左右留白归到 segmentRow */
+  segmentRow: {
     flexDirection: 'row',
-    marginTop: 14,
+    alignItems: 'center',
+    marginTop: 12,
     marginHorizontal: 18,
+    gap: 12,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: 12,
     padding: 4,
@@ -847,6 +887,19 @@ const styles = StyleSheet.create({
   segItemOn: { backgroundColor: 'rgba(255,255,255,0.13)' },
   segText: { fontSize: 13, color: S.muted },
   segTextOn: { color: '#fff', fontWeight: '700' },
+  /** 歌词 tab 右侧：切换中文译文显隐 */
+  zhToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  zhToggleText: { fontSize: 12, color: S.textSub },
   panel: {
     flex: 1,
     marginTop: 12,
@@ -858,19 +911,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     overflow: 'hidden',
   },
+  /** 学习要点：白底面板 */
+  panelLight: { backgroundColor: '#FFFFFF' },
   lyricScroll: { flex: 1 },
   lyricBody: { paddingBottom: 12 },
   lyricItem: { paddingVertical: 6, minHeight: LYRIC_LINE_HEIGHT - 12 },
   lyricHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  lyricEn: { flex: 1, fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.86)' },
-  lyricEnOn: { fontSize: 15.5, fontWeight: '700', color: '#fff' },
-  lyricTime: { fontSize: 10, color: S.gold },
-  /** 时间戳变成跳转入口，加大点按区域 */
-  lyricTimeBtn: { marginLeft: 8, paddingHorizontal: 4, paddingVertical: 4 },
-  lyricZh: { fontSize: 12, color: S.muted, marginTop: 4 },
-  lyricZhOn: { color: 'rgba(255,255,255,0.66)', marginLeft: 20 },
-  zhOnly: { fontSize: 13, lineHeight: 20, color: 'rgba(255,255,255,0.8)', marginBottom: 12 },
-  zhOnlyOn: { color: '#fff', fontWeight: '700' },
+  lyricEn: { flex: 1, fontSize: 17, fontWeight: '600', color: 'rgba(255,255,255,0.86)', lineHeight: 24 },
+  lyricEnOn: { fontSize: 17.5, fontWeight: '700', color: '#fff', lineHeight: 24 },
+  lyricZh: { fontSize: 14, color: S.muted, marginTop: 5, lineHeight: 20 },
+  lyricZhOn: { color: 'rgba(255,255,255,0.66)', marginLeft: 20, lineHeight: 20 },
   learnPanel: { paddingVertical: 8 },
   learnCta: {
     flexDirection: 'row',
@@ -885,13 +935,15 @@ const styles = StyleSheet.create({
   learnHint: { fontSize: 11, lineHeight: 17, color: S.muted, marginTop: 12 },
   emptyPanel: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   emptyText: { fontSize: 13, color: S.muted },
+  /** 白底面板下的空态文案 */
+  emptyTextLight: { color: '#999' },
   /** 学习要点 */
   examBody: { paddingBottom: 16, gap: 12 },
   examSummaryCard: {
-    backgroundColor: 'rgba(245,197,66,0.10)',
+    backgroundColor: 'rgba(245,197,66,0.14)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(245,197,66,0.24)',
+    borderColor: 'rgba(245,197,66,0.5)',
     paddingVertical: 12,
     paddingHorizontal: 14,
   },
@@ -906,15 +958,15 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     marginBottom: 8,
   },
-  examLevelText: { fontSize: 11, fontWeight: '700', color: S.gold },
-  examSummary: { fontSize: 13, lineHeight: 20, color: 'rgba(255,255,255,0.82)' },
+  examLevelText: { fontSize: 11, fontWeight: '700', color: '#9A6B00' },
+  examSummary: { fontSize: 13, lineHeight: 20, color: '#3D3D3D' },
   examCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: '#F6F7FB',
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(0,0,0,0.06)',
   },
   examCardHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   examCatTag: {
@@ -927,7 +979,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14.5,
     fontWeight: '700',
-    color: '#fff',
+    color: '#1A1A1A',
   },
   examExample: { flexDirection: 'row', marginTop: 10, gap: 8 },
   examQuoteBar: {
@@ -941,12 +993,12 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 18,
     fontStyle: 'italic',
-    color: 'rgba(255,255,255,0.74)',
+    color: '#555',
   },
   examAnalysis: {
     fontSize: 12.5,
     lineHeight: 19,
-    color: 'rgba(255,255,255,0.62)',
+    color: '#666',
     marginTop: 10,
   },
 });

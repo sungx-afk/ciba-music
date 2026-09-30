@@ -57,6 +57,7 @@ export const LyricsScreen: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     if (!activeWord || isAdded) return;
     setAdded((prev) => ({ ...prev, [activeWord.word]: true }));
     showToast('已加入生词本', 'success');
+    setCardOpen(false);
   };
 
   /** 逐词模式的句子：只有歌词里带释义的单词可点，点中后展示释义卡片 */
