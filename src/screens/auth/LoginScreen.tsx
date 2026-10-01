@@ -26,11 +26,11 @@ import { AuthNavProps } from '../../navigation/authNav';
 type LoginTab = 'mobile' | 'password';
 
 /**
- * 临时开关：第三方登录（微信 / Apple）在 UI 上先隐藏。
- * 只影响展示，登录逻辑与授权回调监听全部保留，
- * 需要重新露出按钮时把这个常量改回 true 即可。
+ * 临时开关：分别控制第三方登录在 UI 上的展示，登录逻辑与授权回调监听全部保留。
+ * 需要重新露出某个按钮时把对应常量改回 true 即可。
  */
-const SHOW_THIRD_PARTY_LOGIN = false;
+const SHOW_WECHAT_LOGIN = false;
+const SHOW_APPLE_LOGIN = true;
 
 export const LoginScreen: React.FC<AuthNavProps> = ({ onBack, onOpen }) => {
   
@@ -580,7 +580,7 @@ export const LoginScreen: React.FC<AuthNavProps> = ({ onBack, onOpen }) => {
 
           {/* 下半部托底群组：第三方社交登录自然贴靠底部 */}
           <View style={styles.bottomGroup}>
-            {SHOW_THIRD_PARTY_LOGIN ? (
+            {(SHOW_APPLE_LOGIN || SHOW_WECHAT_LOGIN) ? (
               <>
                 <View style={styles.socialDividerRow}>
                   <View style={styles.socialLine} />
@@ -590,21 +590,23 @@ export const LoginScreen: React.FC<AuthNavProps> = ({ onBack, onOpen }) => {
 
                 <View style={styles.socialBtnGroup}>
                   {/* 微信登录 */}
-                  <TouchableOpacity
-                    style={[styles.socialCircleBtn, styles.wechatBg]}
-                    onPress={handleWechatLogin}
-                    activeOpacity={0.8}
-                    disabled={socialLoading}
-                  >
-                    {socialLoading ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Ionicons name="logo-wechat" size={25} color="#FFFFFF" />
-                    )}
-                  </TouchableOpacity>
+                  {SHOW_WECHAT_LOGIN && (
+                    <TouchableOpacity
+                      style={[styles.socialCircleBtn, styles.wechatBg]}
+                      onPress={handleWechatLogin}
+                      activeOpacity={0.8}
+                      disabled={socialLoading}
+                    >
+                      {socialLoading ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Ionicons name="logo-wechat" size={25} color="#FFFFFF" />
+                      )}
+                    </TouchableOpacity>
+                  )}
 
                   {/* Apple 登录 (仅在 iOS 系统显示) */}
-                  {Platform.OS === 'ios' && (
+                  {SHOW_APPLE_LOGIN && Platform.OS === 'ios' && (
                     <TouchableOpacity
                       style={[styles.socialCircleBtn, styles.appleBg]}
                       onPress={handleAppleLogin}
