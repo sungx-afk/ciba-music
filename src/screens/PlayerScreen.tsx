@@ -17,7 +17,7 @@ import {
   LyricLine,
   MusicApi,
   MusicSong,
-  ExamPointAnalysis,
+  ExamPointEntry,
   formatMillis,
   parseLyricLines,
 } from '../services/musicApi';
@@ -28,35 +28,109 @@ import { openAppleMusicSubscribe } from '../services/appleMusic';
 import { accountIdOf, recordRecentPlay } from '../services/recentPlays';
 import { useAuth } from '../context/AuthContext';
 import { showToast } from '../utils/toast';
+import { parseExamContent } from '../utils/examContent';
 import { WordLookupCard } from '../components/WordLookupCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TABS = ['歌词', '学习要点'];
 
-/** 考点分类对应的主题色（学习要点面板为白底，深色下用半透明底 + 亮色字） */
-const CATEGORY_THEME: Record<string, { bg: string; fg: string }> = {
-  词汇: { bg: 'rgba(91,108,217,0.22)', fg: '#A7B2F0' },
-  短语搭配: { bg: 'rgba(46,196,164,0.20)', fg: '#5FE3C0' },
-  语法: { bg: 'rgba(155,120,245,0.22)', fg: '#C4A9FF' },
-  句型: { bg: 'rgba(245,166,35,0.22)', fg: '#F5C542' },
-  修辞: { bg: 'rgba(255,122,158,0.20)', fg: '#FF9BB6' },
+/** 考点类型对应的主题色（学习要点面板为白底，深色下用半透明底 + 亮色字） */
+const TYPE_THEME: Record<string, { bg: string; fg: string }> = {
+  重点词: { bg: 'rgba(91,108,217,0.22)', fg: '#A7B2F0' },
+  重点短语: { bg: 'rgba(46,196,164,0.20)', fg: '#5FE3C0' },
+  重点句子: { bg: 'rgba(245,166,35,0.22)', fg: '#F5C542' },
 };
 /** 白底模式下的深色字配色（对比度更高） */
-const CATEGORY_THEME_LIGHT: Record<string, { bg: string; fg: string }> = {
-  词汇: { bg: 'rgba(91,108,217,0.12)', fg: '#3A47A0' },
-  短语搭配: { bg: 'rgba(46,196,164,0.14)', fg: '#0F8A6E' },
-  语法: { bg: 'rgba(155,120,245,0.14)', fg: '#6A3FD0' },
-  句型: { bg: 'rgba(245,166,35,0.16)', fg: '#B5790A' },
-  修辞: { bg: 'rgba(255,122,158,0.14)', fg: '#C23A66' },
+const TYPE_THEME_LIGHT: Record<string, { bg: string; fg: string }> = {
+  重点词: { bg: 'rgba(91,108,217,0.12)', fg: '#3A47A0' },
+  重点短语: { bg: 'rgba(46,196,164,0.14)', fg: '#0F8A6E' },
+  重点句子: { bg: 'rgba(245,166,35,0.16)', fg: '#B5790A' },
 };
 const DEFAULT_THEME = { bg: 'rgba(255,255,255,0.12)', fg: 'rgba(255,255,255,0.78)' };
 const DEFAULT_THEME_LIGHT = { bg: 'rgba(0,0,0,0.06)', fg: '#555' };
-const categoryTheme = (cat?: string, light = false) =>
-  (cat && (light ? CATEGORY_THEME_LIGHT : CATEGORY_THEME)[cat]) ||
+const typeTheme = (t?: string, light = false) =>
+  (t && (light ? TYPE_THEME_LIGHT : TYPE_THEME)[t]) ||
   (light ? DEFAULT_THEME_LIGHT : DEFAULT_THEME);
 
 /** 歌词行最小高度（仅是视觉用；滚动定位已改成 onLayout 实测，不再拿它算位置） */
 const LYRIC_LINE_HEIGHT = 72;
+
+/** 讲解正文里出现的词条加粗，方便一眼定位重点词 */
+const highlightItem = (text: string, item?: string) => {
+  const word = (item || '').trim();
+  if (!word || word.length > 40) return text;
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+  if (parts.length < 2) return text;
+  return parts.map((part, i) =>
+    part.toLowerCase() === word.toLowerCase() ? (
+      <Text key={i} style={styles.examHi}>
+        {part}
+      </Text>
+    ) : (
+      part
+    ),
+  );
+};
+
+/**
+ * 学习要点讲解：后端下发的是整段纯文本，这里按解析结果分区渲染——
+ * 普通段落 / 搭配清单 / 注意事项 / 编号例句，避免「一堵墙」。
+ */
+const renderExamDetail = (e: ExamPointEntry) => {
+  const segments = parseExamContent(e.content);
+  if (!segments.length) return null;
+  return segments.map((seg, i) => {
+    if (seg.kind === 'para') {
+      return (
+        <Text style={styles.examPara} key={i}>
+          {highlightItem(seg.text, e.item)}
+        </Text>
+      );
+    }
+    if (seg.kind === 'list') {
+      return (
+        <View style={styles.examSection} key={i}>
+          <Text style={styles.examSectionLabel}>{seg.title}</Text>
+          {seg.items.map((it, j) => (
+            <View style={styles.examListRow} key={j}>
+              <View style={styles.examListDot} />
+              <Text style={styles.examListText}>
+                <Text style={styles.examListTerm}>{it.term}</Text>
+                {it.gloss ? <Text style={styles.examListGloss}>{`　${it.gloss}`}</Text> : null}
+              </Text>
+            </View>
+          ))}
+        </View>
+      );
+    }
+    if (seg.kind === 'note') {
+      return (
+        <View style={styles.examNote} key={i}>
+          <Ionicons name="alert-circle-outline" size={14} color="#C79A2A" style={styles.examNoteIcon} />
+          <View style={styles.examNoteBody}>
+            <Text style={styles.examNoteTitle}>{seg.title}</Text>
+            <Text style={styles.examNoteText}>{highlightItem(seg.text, e.item)}</Text>
+          </View>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.examSection} key={i}>
+        <Text style={styles.examSectionLabel}>例句</Text>
+        {seg.items.map((it, j) => (
+          <View style={styles.examEgRow} key={j}>
+            <Text style={styles.examEgIndex}>{j + 1}</Text>
+            <View style={styles.examEgBody}>
+              <Text style={styles.examEgEn}>{highlightItem(it.en, e.item)}</Text>
+              {it.zh ? <Text style={styles.examEgZh}>{it.zh}</Text> : null}
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  });
+};
 
 type OpenFn = (name: string, params?: Record<string, any>) => void;
 
@@ -147,6 +221,11 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   /** 用来识别「新的一次播完」 */
   const lastFinished = useRef(0);
 
+  /** 学习要点翻页：当前页索引 / 每页宽度 / 横向滚动容器 */
+  const pagerRef = useRef<ScrollView | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageW, setPageW] = useState(0);
+
   const playing = isDemo ? demoPlaying : player.playing;
 
   const loadingAudio = !isDemo && player.loading;
@@ -187,18 +266,31 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
 
   const lines = useMemo(() => (isDemo ? DEMO_LINES : parseLyricLines(current)), [isDemo, current]);
 
-  /** 学习要点：把服务端 examPoints JSON 串解析成结构化数据（解析失败就当空） */
-  const examData = useMemo<ExamPointAnalysis | null>(() => {
-    const raw = current?.examPoints;
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw) as ExamPointAnalysis;
-      if (!parsed || (typeof parsed !== 'object')) return null;
-      return parsed;
-    } catch {
-      return null;
+  /** 学习要点：切歌时单独调接口拉取 /musics/{id}/exam_points，显示内容由返回数据决定 */
+  const [examData, setExamData] = useState<ExamPointEntry[] | null>(null);
+  const [examLoading, setExamLoading] = useState(false);
+  useEffect(() => {
+    if (isDemo || !current?.id) {
+      setExamData(null);
+      return;
     }
-  }, [current?.examPoints]);
+    let alive = true;
+    setExamLoading(true);
+    setExamData(null);
+    MusicApi.getExamPoints(current.id)
+      .then((data) => {
+        if (alive) setExamData(data);
+      })
+      .catch(() => {
+        if (alive) setExamData(null);
+      })
+      .finally(() => {
+        if (alive) setExamLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [current?.id, isDemo]);
 
   /** 当前唱到哪一句：取最后一行 seconds 不超过播放进度的 */
   const activeLine = useMemo(() => {
@@ -312,6 +404,11 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     lyricOffsets.current = [];
     lyricRef.current?.scrollTo({ y: 0, animated: false });
   }, [current?.id]);
+
+  /** 切歌重置翻页到第 1 个考点 */
+  useEffect(() => {
+    setPage(0);
+  }, [examData]);
 
   /** 切歌时同步「完成」状态（取自服务端回填的 learned），避免沿用上一首的状态 */
   useEffect(() => {
@@ -482,13 +579,20 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     );
   };
 
-  /** 学习要点：整体概述卡 + 逐条考点卡（分类配色、歌词原句、讲解） */
+  /** 学习要点：一屏一个考点，左右翻页 + 进度点 + 上/下一词 */
   const renderExamPoints = () => {
     /** 学习要点面板是白底，考点分类标签 / 文案全部走深色配色 */
     const light = tab === '学习要点';
-    const hasContent =
-      examData && (examData.summary || (examData.points && examData.points.length));
-    if (!hasContent) {
+    if (examLoading) {
+      return (
+        <View style={styles.emptyPanel}>
+          <ActivityIndicator size="small" color="#B7B7B7" />
+          <Text style={[styles.emptyText, styles.emptyTextLight]}>学习要点加载中…</Text>
+        </View>
+      );
+    }
+    const list = examData;
+    if (!list || !list.length) {
       return (
         <View style={styles.emptyPanel}>
           <Ionicons name="school-outline" size={24} color="#B7B7B7" />
@@ -496,47 +600,100 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
         </View>
       );
     }
+
+    const total = list.length;
+    const goToPage = (target: number) => {
+      const p = Math.max(0, Math.min(target, total - 1));
+      setPage(p);
+      pagerRef.current?.scrollTo({ x: p * pageW, animated: true });
+    };
+
     return (
-      <ScrollView
-        style={styles.lyricScroll}
-        contentContainerStyle={styles.examBody}
-        showsVerticalScrollIndicator={false}
-        nestedScrollEnabled
-      >
-        {(examData!.level || examData!.summary) && (
-          <View style={styles.examSummaryCard}>
-            {examData!.level ? (
-              <View style={styles.examLevelTag}>
-                <Ionicons name="ribbon-outline" size={12} color={S.gold} />
-                <Text style={styles.examLevelText}>{examData!.level}</Text>
+      <View style={styles.examPager}>
+        <ScrollView
+          ref={pagerRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          nestedScrollEnabled
+          style={styles.lyricScroll}
+          contentContainerStyle={styles.examPagerTrack}
+          onLayout={(e) => {
+            const w = e.nativeEvent.layout.width;
+            if (w && w !== pageW) setPageW(w);
+          }}
+          onMomentumScrollEnd={(e) => {
+            if (pageW > 0) setPage(Math.round(e.nativeEvent.contentOffset.x / pageW));
+          }}
+        >
+          {list.map((e, i) => {
+            const theme = typeTheme(e.type, light);
+            return (
+              <View style={[styles.examPage, { width: pageW || undefined }]} key={i}>
+                <ScrollView
+                  style={styles.lyricScroll}
+                  contentContainerStyle={styles.examPageInner}
+                  showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled
+                >
+                  <View style={styles.examCard}>
+                    <View style={styles.examCardHead}>
+                      <View style={[styles.examCatTag, { backgroundColor: theme.bg }]}>
+                        <Text style={[styles.examCatText, { color: theme.fg }]}>{e.type || '考点'}</Text>
+                      </View>
+                      {e.level ? (
+                        <View style={styles.examLevelTag}>
+                          <Ionicons name="ribbon-outline" size={12} color={S.gold} />
+                          <Text style={styles.examLevelText}>{e.level}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    {e.item ? <Text style={styles.examPointTitle}>{e.item}</Text> : null}
+                    {e.source ? (
+                      <View style={styles.examExample}>
+                        <View style={styles.examQuoteBar} />
+                        <Text style={styles.examExampleText}>{e.source}</Text>
+                      </View>
+                    ) : null}
+                    {renderExamDetail(e)}
+                  </View>
+                </ScrollView>
               </View>
-            ) : null}
-            {examData!.summary ? (
-              <Text style={styles.examSummary}>{examData!.summary}</Text>
-            ) : null}
-          </View>
-        )}
-        {(examData!.points || []).map((p, i) => {
-          const theme = categoryTheme(p.category, light);
-          return (
-            <View style={styles.examCard} key={i}>
-              <View style={styles.examCardHead}>
-                <View style={[styles.examCatTag, { backgroundColor: theme.bg }]}>
-                  <Text style={[styles.examCatText, { color: theme.fg }]}>{p.category || '考点'}</Text>
-                </View>
-                {p.point ? <Text style={styles.examPointTitle}>{p.point}</Text> : null}
-              </View>
-              {p.example ? (
-                <View style={styles.examExample}>
-                  <View style={styles.examQuoteBar} />
-                  <Text style={styles.examExampleText}>{p.example}</Text>
-                </View>
-              ) : null}
-              {p.analysis ? <Text style={styles.examAnalysis}>{p.analysis}</Text> : null}
-            </View>
-          );
-        })}
-      </ScrollView>
+            );
+          })}
+        </ScrollView>
+
+        <View style={styles.examDots}>
+          {list.map((_, i) => (
+            <TouchableOpacity
+              key={i}
+              activeOpacity={0.6}
+              onPress={() => goToPage(i)}
+              style={[styles.examDot, i === page && styles.examDotOn]}
+            />
+          ))}
+        </View>
+
+        <View style={styles.examNav}>
+          <TouchableOpacity
+            style={[styles.examNavBtn, page === 0 && styles.examNavBtnOff]}
+            disabled={page === 0}
+            onPress={() => goToPage(page - 1)}
+          >
+            <Ionicons name="chevron-back" size={16} color={page === 0 ? '#B7B7B7' : '#fff'} />
+            <Text style={[styles.examNavText, page === 0 && styles.examNavTextOff]}>上一词</Text>
+          </TouchableOpacity>
+          <Text style={styles.examNavCount}>{`${page + 1} / ${total}`}</Text>
+          <TouchableOpacity
+            style={[styles.examNavBtn, page >= total - 1 && styles.examNavBtnOff]}
+            disabled={page >= total - 1}
+            onPress={() => goToPage(page + 1)}
+          >
+            <Text style={[styles.examNavText, page >= total - 1 && styles.examNavTextOff]}>下一词</Text>
+            <Ionicons name="chevron-forward" size={16} color={page >= total - 1 ? '#B7B7B7' : '#fff'} />
+          </TouchableOpacity>
+        </View>
+      </View>
     );
   };
 
@@ -950,13 +1107,12 @@ const styles = StyleSheet.create({
   examLevelTag: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    gap: 4,
+    height: 22,
     backgroundColor: 'rgba(245,197,66,0.16)',
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginBottom: 8,
   },
   examLevelText: { fontSize: 11, fontWeight: '700', color: '#9A6B00' },
   examSummary: { fontSize: 13, lineHeight: 20, color: '#3D3D3D' },
@@ -968,15 +1124,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.06)',
   },
-  examCardHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  examCardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   examCatTag: {
+    height: 22,
+    justifyContent: 'center',
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 3,
   },
-  examCatText: { fontSize: 10.5, fontWeight: '700' },
+  examCatText: { fontSize: 10.5, fontWeight: '700', lineHeight: 14 },
   examPointTitle: {
-    flex: 1,
+    marginTop: 8,
     fontSize: 14.5,
     fontWeight: '700',
     color: '#1A1A1A',
@@ -995,10 +1152,87 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     color: '#555',
   },
-  examAnalysis: {
-    fontSize: 12.5,
-    lineHeight: 19,
-    color: '#666',
+  /** 讲解正文：普通段落 */
+  examPara: {
     marginTop: 10,
+    fontSize: 13,
+    lineHeight: 21,
+    color: '#5A6070',
   },
+  /** 正文里高亮的词条 */
+  examHi: { color: '#2E3A63', fontWeight: '700' },
+  /** 讲解分区（搭配清单 / 例句） */
+  examSection: { marginTop: 13 },
+  examSectionLabel: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    color: '#6B7180',
+    marginBottom: 7,
+  },
+  examListRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 5 },
+  examListDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#B9C0D4',
+    marginTop: 9,
+    marginRight: 8,
+  },
+  examListText: { flex: 1, fontSize: 12.5, lineHeight: 20 },
+  examListTerm: { fontWeight: '700', color: '#1F2430' },
+  examListGloss: { color: '#7A8090' },
+  /** 注意事项提示框 */
+  examNote: {
+    flexDirection: 'row',
+    marginTop: 13,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245,197,66,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,66,0.34)',
+  },
+  examNoteIcon: { marginRight: 7, marginTop: 1 },
+  examNoteBody: { flex: 1 },
+  examNoteTitle: { fontSize: 11.5, fontWeight: '800', color: '#9A6B00' },
+  examNoteText: { marginTop: 4, fontSize: 12.5, lineHeight: 20, color: '#6E5A22' },
+  /** 编号例句 */
+  examEgRow: { flexDirection: 'row', marginTop: 9 },
+  examEgIndex: {
+    width: 16,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#5B6CD9',
+    lineHeight: 19,
+  },
+  examEgBody: { flex: 1 },
+  examEgEn: { fontSize: 12.5, lineHeight: 19, color: '#2A2F3A' },
+  examEgZh: { marginTop: 3, fontSize: 12, lineHeight: 18, color: '#71767F' },
+  /** 学习要点翻页：一屏一个考点 */
+  examPager: { flex: 1 },
+  examPagerTrack: {},
+  examPage: { height: '100%' },
+  examPageInner: { paddingHorizontal: 16, paddingVertical: 10, paddingBottom: 18 },
+  examDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 9,
+  },
+  examDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.16)' },
+  examDotOn: { width: 16, backgroundColor: S.gold },
+  examNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  examNavBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10 },
+  examNavBtnOff: { opacity: 0.4 },
+  examNavText: { fontSize: 13, fontWeight: '700', color: '#3A3A3A' },
+  examNavTextOff: { color: '#B7B7B7' },
+  examNavCount: { fontSize: 12.5, fontWeight: '700', color: 'rgba(0,0,0,0.5)' },
 });

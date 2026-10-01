@@ -59,32 +59,25 @@ export interface MusicSong {
   /** 当前登录用户是否已学该歌（服务器按 tbl_music_learned 回填） */
   learned?: boolean;
   /**
-   * 学习要点：AI 据歌词分析的考点，服务端存为 JSON 字符串。
-   * 结构见 ExamPointAnalysis：{ summary, level, points: [{ category, point, example, analysis }] }
+   * 学习要点：旧接口曾把考点分析存为 JSON 字符串下发，现改由
+   * MusicApi.getExamPoints(id) 单独拉取（/musics/{id}/exam_points）。
+   * 该字段已不再用于渲染，保留以兼容历史列表接口，后续可删除。
    */
   examPoints?: string;
 }
 
-/** 单个考点（对应服务端 ExamPoint） */
-export interface ExamPointItem {
-  /** 分类：词汇 / 短语搭配 / 语法 / 句型 / 修辞 等 */
-  category?: string;
-  /** 考点名称，如「虚拟语气」「take it easy」 */
-  point?: string;
-  /** 歌词中的原文例句 */
-  example?: string;
-  /** 考点讲解 */
-  analysis?: string;
-}
-
-/** 整首歌的考点分析（对应服务端 ExamPointAnalysis） */
-export interface ExamPointAnalysis {
-  /** 整体概述 */
-  summary?: string;
-  /** 建议适配的考试 / 难度级别，如 CET-4、考研 */
+/** 单条学习要点（对应 /musics/{id}/exam_points 的 list 项） */
+export interface ExamPointEntry {
+  /** 词条：单词 / 短语 / 句子，如 wonder、just like、It made me smile */
+  item?: string;
+  /** 出处：该词条所在的歌词原句 */
+  source?: string;
+  /** 建议考试级别：中考 / 高考 / 四级 / 六级 … */
   level?: string;
-  /** 考点明细 */
-  points?: ExamPointItem[];
+  /** 类型：重点词 / 重点短语 / 重点句子 */
+  type?: string;
+  /** 讲解正文 */
+  content?: string;
 }
 
 /** 一行双语歌词：seconds 用于跟播放进度对齐 */
@@ -254,6 +247,32 @@ export const MusicApi = {
         examPoints: toText(item.examPoints) || undefined,
       })),
     };
+  },
+
+  /**
+   * 单独拉取某首歌的学习要点。
+   * GET /musics/{musicId}/exam_points
+   * 返回结构：{ result: 0, list: [{ item, source, level, type, content }] }
+   * 显示内容完全由返回数据决定：取 list 数组逐条渲染，解析不到就返回 null。
+   */
+  getExamPoints: async (musicId: number): Promise<ExamPointEntry[] | null> => {
+    const res = await api.get<any>(`/musics/${musicId}/exam_points`).catch(() => null);
+    if (!res) return null;
+    const raw = Array.isArray(res?.list)
+      ? res.list
+      : Array.isArray(res?.data?.list)
+        ? res.data.list
+        : Array.isArray(res)
+          ? res
+          : null;
+    if (!raw) return null;
+    return raw.map((it: any): ExamPointEntry => ({
+      item: toText(it.item) || undefined,
+      source: toText(it.source) || undefined,
+      level: toText(it.level) || undefined,
+      type: toText(it.type) || undefined,
+      content: toText(it.content) || undefined,
+    }));
   },
 
   /**
