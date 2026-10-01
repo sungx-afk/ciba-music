@@ -76,60 +76,81 @@ const highlightItem = (text: string, item?: string) => {
 /**
  * 学习要点讲解：后端下发的是整段纯文本，这里按解析结果分区渲染——
  * 普通段落 / 搭配清单 / 注意事项 / 编号例句，避免「一堵墙」。
+ *
+ * 每段长文本都渲染成「卡片的直接 Text 子节点」（与普通段落同构）：
+ * 只有这种结构在真机上会按卡片宽度折行；一旦套上一层 View（行内图标 + flex:1
+ * 文本的写法），长文本就拿不到可用宽度，会整行溢出、被外层面板裁掉。
+ * 因为返回值是平铺的节点数组，所以每项都要带 key。
  */
 const renderExamDetail = (e: ExamPointEntry) => {
   const segments = parseExamContent(e.content);
   if (!segments.length) return null;
-  return segments.map((seg, i) => {
+  const nodes: React.ReactNode[] = [];
+
+  segments.forEach((seg, i) => {
     if (seg.kind === 'para') {
-      return (
-        <Text style={styles.examPara} key={i}>
+      nodes.push(
+        <Text style={styles.examPara} key={`para-${i}`}>
           {highlightItem(seg.text, e.item)}
-        </Text>
+        </Text>,
       );
+      return;
     }
+
     if (seg.kind === 'list') {
-      return (
-        <View style={styles.examSection} key={i}>
-          <Text style={styles.examSectionLabel}>{seg.title}</Text>
-          {seg.items.map((it, j) => (
-            <View style={styles.examListRow} key={j}>
-              <View style={styles.examListDot} />
-              <Text style={styles.examListText}>
-                <Text style={styles.examListTerm}>{it.term}</Text>
-                {it.gloss ? <Text style={styles.examListGloss}>{`　${it.gloss}`}</Text> : null}
-              </Text>
-            </View>
-          ))}
-        </View>
+      nodes.push(
+        <Text style={styles.examSectionLabel} key={`list-${i}`}>
+          {seg.title}
+        </Text>,
       );
+      seg.items.forEach((it, j) => {
+        nodes.push(
+          <Text style={styles.examListItem} key={`list-${i}-${j}`}>
+            <Text style={styles.examListBullet}>{'·  '}</Text>
+            <Text style={styles.examListTerm}>{it.term}</Text>
+            {it.gloss ? <Text style={styles.examListGloss}>{`　${it.gloss}`}</Text> : null}
+          </Text>,
+        );
+      });
+      return;
     }
+
     if (seg.kind === 'note') {
-      return (
-        <View style={styles.examNote} key={i}>
-          <Ionicons name="alert-circle-outline" size={14} color="#C79A2A" style={styles.examNoteIcon} />
-          <View style={styles.examNoteBody}>
-            <Text style={styles.examNoteTitle}>{seg.title}</Text>
-            <Text style={styles.examNoteText}>{highlightItem(seg.text, e.item)}</Text>
-          </View>
-        </View>
+      // 注意 / 易错点：整块就是一个 Text，背景/边框/内边距都挂在 Text 上，
+      // 图标 + 小标题占一行，讲解正文紧随其后换行
+      nodes.push(
+        <Text style={styles.examNote} key={`note-${i}`}>
+          <Ionicons name="alert-circle-outline" size={13} color="#C79A2A" />
+          <Text style={styles.examNoteTitle}>{`  ${seg.title}\n`}</Text>
+          {highlightItem(seg.text, e.item)}
+        </Text>,
       );
+      return;
     }
-    return (
-      <View style={styles.examSection} key={i}>
-        <Text style={styles.examSectionLabel}>例句</Text>
-        {seg.items.map((it, j) => (
-          <View style={styles.examEgRow} key={j}>
-            <Text style={styles.examEgIndex}>{j + 1}</Text>
-            <View style={styles.examEgBody}>
-              <Text style={styles.examEgEn}>{highlightItem(it.en, e.item)}</Text>
-              {it.zh ? <Text style={styles.examEgZh}>{it.zh}</Text> : null}
-            </View>
-          </View>
-        ))}
-      </View>
+
+    nodes.push(
+      <Text style={styles.examSectionLabel} key={`eg-${i}`}>
+        例句
+      </Text>,
     );
+    seg.items.forEach((it, j) => {
+      nodes.push(
+        <Text style={styles.examEgEn} key={`eg-${i}-${j}`}>
+          <Text style={styles.examEgIndex}>{`${j + 1}  `}</Text>
+          {highlightItem(it.en, e.item)}
+        </Text>,
+      );
+      if (it.zh) {
+        nodes.push(
+          <Text style={styles.examEgZh} key={`eg-${i}-${j}-zh`}>
+            {it.zh}
+          </Text>,
+        );
+      }
+    });
   });
+
+  return nodes;
 };
 
 type OpenFn = (name: string, params?: Record<string, any>) => void;
@@ -650,10 +671,7 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
                     </View>
                     {e.item ? <Text style={styles.examPointTitle}>{e.item}</Text> : null}
                     {e.source ? (
-                      <View style={styles.examExample}>
-                        <View style={styles.examQuoteBar} />
-                        <Text style={styles.examExampleText}>{e.source}</Text>
-                      </View>
+                      <Text style={styles.examExample}>{e.source}</Text>
                     ) : null}
                     {renderExamDetail(e)}
                   </View>
@@ -1138,15 +1156,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
   },
-  examExample: { flexDirection: 'row', marginTop: 10, gap: 8 },
-  examQuoteBar: {
-    width: 3,
+  /** 歌词原句：整块是一个 Text，左侧竖线用 border 画，长句随卡片宽度折行 */
+  examExample: {
+    marginTop: 10,
+    paddingLeft: 9,
+    borderLeftWidth: 3,
+    borderLeftColor: S.accent,
     borderRadius: 2,
-    backgroundColor: S.accent,
-    marginTop: 2,
-  },
-  examExampleText: {
-    flex: 1,
     fontSize: 12.5,
     lineHeight: 18,
     fontStyle: 'italic',
@@ -1161,59 +1177,53 @@ const styles = StyleSheet.create({
   },
   /** 正文里高亮的词条 */
   examHi: { color: '#2E3A63', fontWeight: '700' },
-  /** 讲解分区（搭配清单 / 例句） */
-  examSection: { marginTop: 13 },
+  /** 分区小标题（常见搭配 / 例句） */
   examSectionLabel: {
+    marginTop: 13,
+    marginBottom: 7,
     fontSize: 10.5,
     fontWeight: '800',
     letterSpacing: 0.6,
     color: '#6B7180',
-    marginBottom: 7,
   },
-  examListRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 5 },
-  examListDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#B9C0D4',
-    marginTop: 9,
-    marginRight: 8,
-  },
-  examListText: { flex: 1, fontSize: 12.5, lineHeight: 20 },
+  /** 搭配清单：一条一行，项目符号写在行内，长词条才会折行 */
+  examListItem: { marginTop: 5, fontSize: 12.5, lineHeight: 20, color: '#1F2430' },
+  examListBullet: { color: '#B9C0D4' },
   examListTerm: { fontWeight: '700', color: '#1F2430' },
   examListGloss: { color: '#7A8090' },
-  /** 注意事项提示框 */
+  /** 注意事项提示框：整块用一个 Text 渲染（背景/边框/内边距挂在 Text 上） */
   examNote: {
-    flexDirection: 'row',
     marginTop: 13,
-    paddingVertical: 10,
+    paddingVertical: 9,
     paddingHorizontal: 12,
     borderRadius: 10,
     backgroundColor: 'rgba(245,197,66,0.14)',
     borderWidth: 1,
     borderColor: 'rgba(245,197,66,0.34)',
+    fontSize: 12.5,
+    lineHeight: 20,
+    color: '#6E5A22',
   },
-  examNoteIcon: { marginRight: 7, marginTop: 1 },
-  examNoteBody: { flex: 1 },
-  examNoteTitle: { fontSize: 11.5, fontWeight: '800', color: '#9A6B00' },
-  examNoteText: { marginTop: 4, fontSize: 12.5, lineHeight: 20, color: '#6E5A22' },
-  /** 编号例句 */
-  examEgRow: { flexDirection: 'row', marginTop: 9 },
-  examEgIndex: {
-    width: 16,
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#5B6CD9',
-    lineHeight: 19,
+  examNoteTitle: { fontSize: 11.5, lineHeight: 17, fontWeight: '800', color: '#9A6B00' },
+  /** 编号例句：序号写在行内，长句折行 */
+  examEgEn: { marginTop: 9, fontSize: 12.5, lineHeight: 19, color: '#2A2F3A' },
+  examEgIndex: { fontSize: 11, fontWeight: '800', color: '#5B6CD9' },
+  examEgZh: {
+    marginTop: 3,
+    paddingLeft: 16,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#71767F',
   },
-  examEgBody: { flex: 1 },
-  examEgEn: { fontSize: 12.5, lineHeight: 19, color: '#2A2F3A' },
-  examEgZh: { marginTop: 3, fontSize: 12, lineHeight: 18, color: '#71767F' },
   /** 学习要点翻页：一屏一个考点 */
   examPager: { flex: 1 },
   examPagerTrack: {},
   examPage: { height: '100%' },
-  examPageInner: { paddingHorizontal: 16, paddingVertical: 10, paddingBottom: 18 },
+  examPageInner: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingBottom: 18,
+  },
   examDots: {
     flexDirection: 'row',
     justifyContent: 'center',
