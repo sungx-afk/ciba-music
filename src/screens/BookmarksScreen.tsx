@@ -588,22 +588,6 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
     [navigation, tabs, activeTab]
   );
 
-  /** 列表底部的提示卡：与首页同一张「边看美剧，边学生词」的说明，只展示不做跳转 */
-  const renderTipCard = () => (
-    <View style={styles.tipCard}>
-      <View style={styles.tipHeader}>
-        <View style={styles.tipTitleRow}>
-          <Ionicons name="bulb" size={15} color={Colors.accent} />
-          <Text style={styles.tipTitle}>边看美剧，边学生词</Text>
-        </View>
-      </View>
-      <Text style={styles.tipText}>
-        电脑访问 <Text style={styles.tipLink}>www.cibaen.com</Text>{' '}
-        安装 Chrome 浏览器插件后，即可在爱奇艺、B 站观看带字幕的视频时，边看视频边添加英文生词。然后在手机上碎片时间记忆单词。
-      </Text>
-    </View>
-  );
-
   /**
    * 把「标记记住」的结果落到三个 tab 上：
    *  - 学习中：直接移除（服务端不会再把它算进来）
@@ -953,8 +937,6 @@ export const BookmarksScreen: React.FC<BookmarksScreenProps> = ({ navigation }) 
               ) : words.length && !activeState.hasMore ? (
                 <Text style={styles.footerText}>没有更多单词了</Text>
               ) : null}
-              {/* 空列表时也渲染，正好告诉用户生词从哪来 */}
-              {renderTipCard()}
             </>
           }
         />
@@ -1149,43 +1131,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 12,
     color: Colors.textMuted,
-  },
-  // ── 底部提示卡（电脑端插件） ──
-  tipCard: {
-    marginHorizontal: 16,
-    marginTop: 6,
-    marginBottom: 20,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: Colors.paper,
-    borderWidth: 1,
-    borderColor: 'rgba(194,154,78,0.18)',
-  },
-  tipHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 9,
-  },
-  tipTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    flexShrink: 1,
-  },
-  tipTitle: {
-    fontSize: 14.5,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  tipText: {
-    fontSize: 13,
-    lineHeight: 22,
-    color: Colors.textSecondary,
-  },
-  tipLink: {
-    fontWeight: '700',
-    color: Colors.pinwheelBlue,
   },
   centerWrap: {
     alignItems: 'center',
