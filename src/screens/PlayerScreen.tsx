@@ -242,11 +242,6 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
   /** 用来识别「新的一次播完」 */
   const lastFinished = useRef(0);
 
-  /** 学习要点翻页：当前页索引 / 每页宽度 / 横向滚动容器 */
-  const pagerRef = useRef<ScrollView | null>(null);
-  const [page, setPage] = useState(0);
-  const [pageW, setPageW] = useState(0);
-
   const playing = isDemo ? demoPlaying : player.playing;
 
   const loadingAudio = !isDemo && player.loading;
@@ -426,11 +421,6 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     lyricRef.current?.scrollTo({ y: 0, animated: false });
   }, [current?.id]);
 
-  /** 切歌重置翻页到第 1 个考点 */
-  useEffect(() => {
-    setPage(0);
-  }, [examData]);
-
   /** 切歌时同步「完成」状态（取自服务端回填的 learned），避免沿用上一首的状态 */
   useEffect(() => {
     setDone(Boolean(current?.learned));
@@ -600,7 +590,7 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
     );
   };
 
-  /** 学习要点：一屏一个考点，左右翻页 + 进度点 + 上/下一词 */
+  /** 学习要点：所有考点竖向整体滚动展示，不再分页 */
   const renderExamPoints = () => {
     /** 学习要点面板是白底，考点分类标签 / 文案全部走深色配色 */
     const light = tab === '学习要点';
@@ -622,96 +612,37 @@ export const PlayerScreen: React.FC<Props> = ({ params, onOpen, onBack }) => {
       );
     }
 
-    const total = list.length;
-    const goToPage = (target: number) => {
-      const p = Math.max(0, Math.min(target, total - 1));
-      setPage(p);
-      pagerRef.current?.scrollTo({ x: p * pageW, animated: true });
-    };
-
     return (
-      <View style={styles.examPager}>
-        <ScrollView
-          ref={pagerRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          nestedScrollEnabled
-          style={styles.lyricScroll}
-          contentContainerStyle={styles.examPagerTrack}
-          onLayout={(e) => {
-            const w = e.nativeEvent.layout.width;
-            if (w && w !== pageW) setPageW(w);
-          }}
-          onMomentumScrollEnd={(e) => {
-            if (pageW > 0) setPage(Math.round(e.nativeEvent.contentOffset.x / pageW));
-          }}
-        >
-          {list.map((e, i) => {
-            const theme = typeTheme(e.type, light);
-            return (
-              <View style={[styles.examPage, { width: pageW || undefined }]} key={i}>
-                <ScrollView
-                  style={styles.lyricScroll}
-                  contentContainerStyle={styles.examPageInner}
-                  showsVerticalScrollIndicator={false}
-                  nestedScrollEnabled
-                >
-                  <View style={styles.examCard}>
-                    <View style={styles.examCardHead}>
-                      <View style={[styles.examCatTag, { backgroundColor: theme.bg }]}>
-                        <Text style={[styles.examCatText, { color: theme.fg }]}>{e.type || '考点'}</Text>
-                      </View>
-                      {e.level ? (
-                        <View style={styles.examLevelTag}>
-                          <Ionicons name="ribbon-outline" size={12} color={S.gold} />
-                          <Text style={styles.examLevelText}>{e.level}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    {e.item ? <Text style={styles.examPointTitle}>{e.item}</Text> : null}
-                    {e.source ? (
-                      <Text style={styles.examExample}>{e.source}</Text>
-                    ) : null}
-                    {renderExamDetail(e)}
+      <ScrollView
+        style={styles.lyricScroll}
+        contentContainerStyle={styles.examScrollBody}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+      >
+        {list.map((e, i) => {
+          const theme = typeTheme(e.type, light);
+          return (
+            <View style={styles.examCard} key={i}>
+              <View style={styles.examCardHead}>
+                <View style={[styles.examCatTag, { backgroundColor: theme.bg }]}>
+                  <Text style={[styles.examCatText, { color: theme.fg }]}>{e.type || '考点'}</Text>
+                </View>
+                {e.level ? (
+                  <View style={styles.examLevelTag}>
+                    <Ionicons name="ribbon-outline" size={12} color={S.gold} />
+                    <Text style={styles.examLevelText}>{e.level}</Text>
                   </View>
-                </ScrollView>
+                ) : null}
               </View>
-            );
-          })}
-        </ScrollView>
-
-        <View style={styles.examDots}>
-          {list.map((_, i) => (
-            <TouchableOpacity
-              key={i}
-              activeOpacity={0.6}
-              onPress={() => goToPage(i)}
-              style={[styles.examDot, i === page && styles.examDotOn]}
-            />
-          ))}
-        </View>
-
-        <View style={styles.examNav}>
-          <TouchableOpacity
-            style={[styles.examNavBtn, page === 0 && styles.examNavBtnOff]}
-            disabled={page === 0}
-            onPress={() => goToPage(page - 1)}
-          >
-            <Ionicons name="chevron-back" size={16} color={page === 0 ? '#B7B7B7' : '#fff'} />
-            <Text style={[styles.examNavText, page === 0 && styles.examNavTextOff]}>上一词</Text>
-          </TouchableOpacity>
-          <Text style={styles.examNavCount}>{`${page + 1} / ${total}`}</Text>
-          <TouchableOpacity
-            style={[styles.examNavBtn, page >= total - 1 && styles.examNavBtnOff]}
-            disabled={page >= total - 1}
-            onPress={() => goToPage(page + 1)}
-          >
-            <Text style={[styles.examNavText, page >= total - 1 && styles.examNavTextOff]}>下一词</Text>
-            <Ionicons name="chevron-forward" size={16} color={page >= total - 1 ? '#B7B7B7' : '#fff'} />
-          </TouchableOpacity>
-        </View>
-      </View>
+              {e.item ? <Text style={styles.examPointTitle}>{e.item}</Text> : null}
+              {e.source ? (
+                <Text style={styles.examExample}>{e.source}</Text>
+              ) : null}
+              {renderExamDetail(e)}
+            </View>
+          );
+        })}
+      </ScrollView>
     );
   };
 
@@ -1141,6 +1072,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.06)',
+    marginBottom: 14,
   },
   examCardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   examCatTag: {
@@ -1215,34 +1147,10 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: '#71767F',
   },
-  /** 学习要点翻页：一屏一个考点 */
-  examPager: { flex: 1 },
-  examPagerTrack: {},
-  examPage: { height: '100%' },
-  examPageInner: {
+  /** 学习要点整体滚动：所有考点竖向排布 */
+  examScrollBody: {
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    paddingBottom: 18,
+    paddingTop: 14,
+    paddingBottom: 20,
   },
-  examDots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 7,
-    paddingVertical: 9,
-  },
-  examDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.16)' },
-  examDotOn: { width: 16, backgroundColor: S.gold },
-  examNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  examNavBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 10 },
-  examNavBtnOff: { opacity: 0.4 },
-  examNavText: { fontSize: 13, fontWeight: '700', color: '#3A3A3A' },
-  examNavTextOff: { color: '#B7B7B7' },
-  examNavCount: { fontSize: 12.5, fontWeight: '700', color: 'rgba(0,0,0,0.5)' },
 });
